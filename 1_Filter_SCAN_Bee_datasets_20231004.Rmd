@@ -1,0 +1,167 @@
+---
+title: "FilterExplore_SCAN_Bee_datasets_20231004"
+author: "Josee Rousseau"
+date: "October 4, 2023"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_depth: '3'
+  html_notebook:
+    fig_caption: no
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+always_allow_html: yes
+---
+
+
+Program name:     FilterExplore_SCAN_Bee_datasets_20231004.rmd 
+
+Program location: ./Cornell/BioD_Pollination/Analysis/Programs/SCAN_paper/Explore_Format_BeeData
+
+Program goal:     Combine SCAN bee data and select years, and locations. Clean and format the records.
+
+Last modified:		October 4, 2023, by Josee Rousseau
+
+
+```{r libraries, echo = FALSE, warning = FALSE, message = FALSE}
+
+library(here)
+library(purrr)
+library(dplyr)
+library(stringr)
+# library(ggplot2)
+# library(sf)
+# library(spData)
+# library(rgdal)
+# library(ggmap)
+# library(scales)
+# library(readxl)
+# library(matchmaker)
+
+options(scipen = 999)
+
+```
+&nbsp;     
+ 
+####**List all SCAN datasets**
+To download SCAN data:    
+1) Go to https://scan-bugs.org/ and login       
+2) Select the "Search" tab, then "Search Collections"
+3) The collections are grouped by project and/or location. Select a group of collections (or just one collection), e.g. all collections in Canada, or all collections under "Bee-Pollinator Projects (BPP)", then press on the button "Search" (upper right)
+4) In the "Enter Search Parameters", select:
+    - Under "Taxonomic Criteria", select the "Higher Taxonomy" drop down menu and start typing each bee family. Select the name they offer.
+    - OR select "Family or Scientific Name" and type the family for which you want to download all records.
+    - Optional: select max and min lat and long. In this case, I used Lat > 24 N, Lat < 47.5 N, Long > -125 W, Long < -66.5 W
+5) Press on the button "Search" in the upper right corner
+6) A list of all the records will appear. Press on the (small and confusing) upper right button for "Download Specimen Data". It looks like two tables overlaping.
+7) In the new window, select:
+    - Structure: Symbiota Native
+    - Data Extension: remove both check marks
+    - File format: CSV
+    - Character set: UTF-8
+    - Compression: keep check mark for zip file
+8) Press on button "Download Data"
+9) I ended up downloading 8 files, representing six families of bees and saved each file as such 
+   "webreq_DwC-A_[family]_[date].zip", for example "webreq_DwC-A_Apidae_20220824.zip"
+   Note that SCAN has a limit of 1 million records downloadable. For big families, it is important to divide the collections as two downloads.
+```{r listDatasets}
+
+### List all file names with bee data
+allFiles <- data.frame(unlist(list.files(path = here("Data", "BeeData_Conservation_paper"), pattern = "occurrences.csv", recursive = TRUE))) # full.names = TRUE, 
+names(allFiles) <- c("File")
+
+### Add a column to identify the family associated with each file
+fileNameElements <- strsplit(allFiles$File, split = "[_/]")
+allFiles$TaxoFam <- map_chr(fileNameElements, c(3))
+
+```
+&nbsp;     
+ 
+####**Download the SCAN files, Keeping only 26 of the 89 columns**
+```{r selectColumnsTaxo}
+
+### Extract name of families
+TaxoFam <- as.vector(allFiles$TaxoFam)
+
+selectColumnsTaxo <- function(File) {
+# File <- allFiles$File[1]
+
+  ### Import file
+  df <- read.csv(here("Data","BeeData_Conservation_paper",File)) 
+  return(df)
+
+}
+
+allColumnsFiles <- purrr::map(allFiles$File, selectColumnsTaxo)
+#View(allColumnsFiles[[4]])
+
+### Name the dataframes in the list of dataframes
+names(allColumnsFiles) <- TaxoFam
+
+### Number of records all combined, for the range of years selected.
+numRecords <- sapply(allColumnsFiles, nrow)
+( numRecords <- sum(numRecords) ) # 4,041,625 records
+
+
+```
+&nbsp;     
+ 
+#### Select only 2021 records
+```{r}
+
+select.yr.fct <- function(df) {
+  
+  ### Make sure all dataframes have same format (they really should)
+  df$id <- as.character(df$id)
+  df$taxonRank <- as.character(df$taxonRank)
+  df$samplingProtocol <- as.character(df$samplingProtocol)
+  df$year <- as.numeric(as.character(df$year))
+  df$month <- as.numeric(as.character(df$month))
+  df$day <- as.numeric(as.character(df$day))
+  df$decimalLatitude <- as.numeric(as.character(df$decimalLatitude))
+  df$decimalLongitude <- as.numeric(as.character(df$decimalLongitude))
+  df$coordinateUncertaintyInMeters <- as.numeric(as.character(df$coordinateUncertaintyInMeters))
+  df$localitySecurityReason <- as.character(df$localitySecurityReason)
+  df$cultivationStatus <- as.character(df$cultivationStatus)
+  df$minimumElevationInMeters <- as.character(df$minimumElevationInMeters)
+  df$maximumElevationInMeters <- as.character(df$maximumElevationInMeters)
+  df <- df %>%
+    mutate_if(is.logical, as.character)
+  
+  return(df)
+}
+
+SCAN.yr <- map_dfr(allColumnsFiles, select.yr.fct)
+# 4,041,625 records
+
+### Assess quality of year information
+summary(SCAN.yr$year)
+   # Min. 1st Qu.  Median    Mean 3rd Qu.    Max.    NA's 
+   #    0    1967    1995    1991    2010    9999  396433 
+badYr <- SCAN.yr[which(SCAN.yr$year > 2023 | is.na(SCAN.yr$year)), c("eventDate", "year", "month", "day", 
+                                                                     "startDayOfYear", "endDayOfYear",
+                                                                     "verbatimEventDate") ]
+# 398,508 records
+# None of the year information in any of these columns could be associated with 2021 (instead of 1921).
+# Here some of the closest info to '21' mentioned in 'verbatimEventDate': Mar 7-21, Jul-21, AUG 21, Abril 8-21
+
+### Select records in 2021
+SCAN.yr <- SCAN.yr[which(SCAN.yr$year == 2021), ]
+# 4,304 records
+
+```
+&nbsp;     
+ 
+####**Export as csv
+```{r}
+
+### Export as csv - with iNaturalist records
+write.csv(SCAN.yr, here("Data", "BeeData_Conservation_paper", "SCAN_Bees_2021_USA_20231004.csv"), row.names = FALSE)
+
+```
+
+
+
+

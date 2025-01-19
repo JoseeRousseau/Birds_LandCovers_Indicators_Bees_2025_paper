@@ -1,0 +1,509 @@
+---
+title: "LeapsModel_LandsOnly_20230829"
+author: "Josee Rousseau"
+date: "2023-08-29"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_depth: '3'
+  html_notebook:
+    fig_caption: no
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+always_allow_html: yes
+---
+
+
+Program name:     LeapsModel_LandsOnly_20230829.rmd 
+
+Program location: ./Programs/BioIndicator/Modelling
+
+Program goal:     Model what land covers predicts bees the best, NOT using subsets of predictors for all datasets since there are only 21 predictors to start with
+
+Last modified:		October 19, 2023, by Josee Rousseau
+
+
+```{r libraries, echo = FALSE, warning = FALSE, message = FALSE}
+
+library(here)
+library(leaps)
+library(caret)
+library(purrr)
+library(dplyr)
+library(tidyverse)
+library(jtools)
+library(car)
+library(sf)
+library(spData)
+library(raster)
+library(purrr)
+library(ebirdst)
+library(stars)
+library(terra)
+library(zoom)
+library(corrplot)
+
+`%ni%` <- Negate(`%in%`)
+options(scipen = 999)
+```
+&nbsp;     
+ 
+#### Function to run a leaps model for each subset
+```{r}
+
+# runLeapsSubModels.fct <- function(DFshuffle) {
+#   
+#   ### Shuffle the variables in the dataframe
+#   df.shuffled <- df[ , c(1, sample(2:ncol(df)))] 
+#   
+#   ### Seperate the predictors in N groups
+#   varGroups <- data.frame(var = 2:numCols, group = as.numeric(cut_number(2:numCols, numSubsets)))
+#   subDF <- 1:numSubsets
+#   
+#   ### Run models for each subset of the data
+#   run.subModels.fct <- function(subDF) {
+#     
+#     df.sub <- df.shuffled[, c(1, varGroups$var[which(varGroups$group == subDF)])]
+#     
+#     m.10 <- regsubsets(beeResponse ~ ., data = df.sub,
+#                        nvmax = numBestVar,   # NULL for no limit on number of variables
+#                        nbest = 1,      # 1 best model for each number of predictors
+#                        method = "exhaustive",
+#                        really.big = TRUE)
+#     
+#     ### Ouput some results and export
+#     summary.10 <- summary(m.10)
+#     coef.10 <- as.data.frame(coef(m.10, 1:dim(summary.10$which)[1])[numBestVar][[1]])
+#     results.10 <- list(df.shuffled, m.10, summary.10, coef.10, df.sub)
+#     # saveRDS(results.10, here("Results", "Bioindicator_Chesshire2021_checklists_easternHalfUSA", "LeapModels", paste0("leapModel_", nameDF,  "_sub", subDF, "_20230509.rds")))
+#     
+#     ### Extract the estimates and significance for the predictors
+#     spp.10 <- summary.10$which[numBestVar,]
+#     df.10.spp <- df.sub[, c(spp.10)]
+#     m.lm.10 <- lm(beeResponse ~ ., data = df.10.spp)
+#     ( lm.10 <- summary(m.lm.10) )
+#     
+#     coefs <- data.frame(round(summary(m.lm.10)$coefficients, 4))
+#     coefs.df <- data.frame(model = nameDF, predictors = row.names(coefs), 
+#                            Estimate = coefs$Estimate, StdError = coefs$Std..Error,
+#                            tValue = coefs$t.value, significance = coefs$Pr...t.., 
+#                            rSquared = summary(m.lm.10)$adj.r.squared, dfShuffle <- DFshuffle, subDF = subDF)
+#     
+#     return(coefs.df)
+#   }
+#   
+#   subResult <- map_dfr(subDF, run.subModels.fct)
+#   
+#   return(subResult)
+#   
+# }
+
+```
+&nbsp;     
+ 
+#### Response: Mean number of species per survey
+#### Select best predictors using data from years 2007 to 2021, minimum 30 bees, 20% prevalence birds and 20% land covers    
+#### Bird residuals are calculated using all bird checklists (regardless of whether there were bees or not)
+```{r}
+
+nameDF <- "BeesMin30_Birds20pct_LandCovers20pct_2007to2021"
+
+nameFile <- "BeesMin30_Birds20pct_LandCovers20pct_2007to2021_no1beeSurv_Resid30BeesCells"
+
+df <- read.csv(here("Data", "BioIndicator", paste0(nameDF, "_no1beeSurv_Resid30BeesCells_20231017.csv")))
+
+### Format df, selecting apprepriate response
+df <- df[,c(2:dim(df)[2])]
+
+### Change name of selected standardized response to "beeResponse"
+colnames(df)[1] <- "beeResponse"
+
+### Scale the predictors
+numCols <- dim(df)[2]
+df[,c(2:numCols)] <- scale(df[,c(2:numCols)], center = TRUE, scale = TRUE) 
+
+### Create birds only or land covers only dataframes
+# names(df)
+# df <- df[ , c(1:80)] # Birds only
+df <- df[ , c(1, 81:numCols)] # Land covers only
+
+### Numbers
+# DFshuffle <- 1:1000
+# numBestVar <- 3
+# numCols <- dim(df)[2] - 1
+# numSubsets <- ifelse(numCols <= 35, 1,
+#                      ifelse(numCols > 35 & numCols < 70, 2,
+#                             ifelse(numCols >= 70 & numCols < 100, 3,
+#                                    ifelse(numCols >= 100 & numCols < 125, 4, 5))))
+#   
+# ### Run the model that subset df and extract best predictors per subset
+# # set.seed(2023)
+# allResults <- map_dfr(DFshuffle, runLeapsSubModels.fct)
+# 
+# ### Extract list of best predictors
+# birds.lc.predictors <- unique(allResults$predictors)
+# birds.lc.predictors <- birds.lc.predictors[!birds.lc.predictors =="(Intercept)"] # 5 predictors (out of 21)
+# 
+# ### Number of times each predictor were selected out of number of DFshuffle
+# numSelection_2 <- allResults %>%
+#   group_by(predictors) %>%
+#   summarise(nModels = n(), meanCoef = mean(Estimate), sdCoef = sd(Estimate), .groups = 'drop')
+
+```
+&nbsp;     
+ 
+#### Uses the predictors selected by subseting the variables, identify the most correlated predictors with bee richness in 100 models   
+```{r}
+
+### Select the predictors within df
+df.preds <- df #[, c("beeResponse", birds.lc.predictors)]
+
+### What is the number of predictor considered, if less than 10?
+numPreds <- ifelse(dim(df.preds)[2] < 11, dim(df.preds)[2] - 1, 10)
+
+### Run model and save results
+set.seed(8617)
+m.30 <- regsubsets(beeResponse ~ ., data = df.preds,
+                   nvmax = 10,   # NULL for no limit on number of variables
+                   nbest = 100,      # 1 best model for each number of predictors
+                   method = "exhaustive",
+                   really.big = TRUE)
+
+### Ouput some results
+s.30 <- summary(m.30)
+# coef(m.30, 1:dim(s.30$which)[1])
+
+### Extract the best models with 10 predictors
+extractPredictors.fct <- function(modelNum) {
+# modelNum <- 860
+
+  ### Extract the predictors
+  spp.30 <- s.30$which[modelNum,]
+  df.30.spp <- df.preds[, c(spp.30)]
+  m.lm.30 <- lm(beeResponse ~ ., data = df.30.spp)
+  lm.30 <- summary(m.lm.30)
+  
+  ### Format
+  df <- data.frame(t(coef(lm.30)[,1]))
+  
+  return(df)
+}
+
+modelNum <- c(822:921)
+results <- map_dfr(modelNum, extractPredictors.fct)
+
+### Calculate the number of times each predictor is selected
+numModelsPerPred <- data.frame(colSums(!is.na(results)))
+numModelsPerPred$predictors <- row.names(numModelsPerPred)
+write.csv(numModelsPerPred, here("Results", "BioIndicator", "numModels_out100_predictorsSelected_landsOnly_20231019.csv"), row.names = FALSE)
+
+### Ouput some results and export
+results.30 <- list(df, m.30, s.30, df.preds, results, numModelsPerPred)
+saveRDS(results.30, here("Results", "BioIndicator", paste0("leapModels_landsOnly_", nameFile, "_20231019.rds")))
+# results.30 <- readRDS(here("Results", "BioIndicator", paste0("leapModels_birdsOnly_", nameFile, "_20231019.rds")))
+
+# remove(DFshuffle, numBestVar, numCols, numSubsets, numSelection, birds.lc.predictors)
+
+```
+&nbsp;     
+ 
+#### Predict bee richness value for each location from the each of the 100 models and extract a mean bee richness per location
+```{r}
+
+### Read results, if needed
+nameFile <- "BeesMin30_Birds20pct_LandCovers20pct_2007to2021_no1beeSurv_Resid30BeesCells"
+results.30 <- readRDS(here("Results", "BioIndicator", paste0("leapModels_landsOnly_", nameFile, "_20231019.rds")))
+predsEstimates <- results.30[[5]]
+predsEstimates[is.na(predsEstimates)] <- 0
+
+### List all the birds and land covers that were selected at least once in the 100 models
+# names(predsEstimates)
+lands <- c("pctAlfalfa", "pctBarren", "pctCorn", "pctDeciForest", "pctDevHighUrban", 
+           "pctDevLowUrban", "pctDoubleCrop", "pctIdleCropland", "pctMixedForest", "pctOpenWater", 
+           "pctConiForest", "pctHerbWetland", "pctBean", "pctDevMedUrban", "pctDevOpenSpace", 
+           "pctGrain", "pctGrassPasture", "pctWoodyWetland", "pctShrubland", "pctOrchard", 
+           "pctGrass")
+
+### Read the status grid to eastern USA
+east.grid <- readRDS(here("Data", "BioIndicator", "birdStatusGrid_4326_EastUSA_3kmGridAndBuffer_20231017.rds"))
+# east.grid <- readRDS(here("Results", "BioIndicator", "Maps", "birdStatusGrid_4326_EastUSA_3km_20230725.rds"))
+
+### East grid vector file as a spatvector
+east.grid2 <- vect(east.grid) 
+
+### Import one bird layer to extract projection and project our grid to that
+eust <- load_raster("/Volumes/BirdsBees/Data/eBird/StatusTrends/2023/2021/eursta", product = "abundance",   # count
+                                 period = "seasonal", metric = "mean", 
+                                 resolution = "hr")
+east.grid3 <- terra::project(east.grid2, crs(eust))
+
+####################################
+### Extract the land cover data ----
+####################################
+
+### Import the CropScape raster file: one per year, covering the whole USA
+# cropScape <- raster(here("Data", "CropScape", "1_Yearly_USA_CropScapeLayers_CropInfo", "CropScape_USA_2021_20230120.tif"))
+# cropScape2 <- terra::rast(cropScape)
+LandCovers <- readRDS(here("Data", "BioIndicator_USGS_SCAN_BirdStatus", "pctLandCovers_CropScape2021_EastHalfUSA_20230120.rds"))
+LandCovers <- na.omit(LandCovers)
+
+### Function - For each land cover, merge with the grid and transform as a raster
+rasterize.grid.fct <- function(landCover) {
+# landCover <- lands[7]  
+  
+  print(landCover)
+
+  ### Identify land cover and extract values per grid cell  
+  lc <- LandCovers[, c("idCells", landCover)]
+  
+  ### Put the inforamtion into space
+  lc.sf <- merge(east.grid3, lc, by = "idCells")
+  
+  ### Rasterize the grid
+  lc.r <- rasterize(lc.sf, eust, field = landCover, cover = FALSE)
+    
+  return(lc.r)
+}
+
+land.maps <- map(lands, rasterize.grid.fct)
+
+########################################################################################
+### For each model (n = 100), calculate the predicted bee richness at each location ####
+########################################################################################
+
+predictMap.perModel.fct <- function(modelRow){
+# modelRow <- 1 
+  df.est <- predsEstimates[modelRow,]
+  
+  # names(predsEstimates)
+  mapBee <- df.est[,1] +
+    (df.est[,2] * land.maps[[1]]) +
+    (df.est[,3] * land.maps[[2]]) +
+    (df.est[,4] * land.maps[[3]]) +       
+    (df.est[,5] * land.maps[[4]]) +
+    (df.est[,6] * land.maps[[5]]) + 
+    (df.est[,7] * land.maps[[6]]) + 
+    (df.est[,8] * land.maps[[7]]) + 
+    (df.est[,9] * land.maps[[8]]) +
+    (df.est[,10] * land.maps[[9]]) +
+    (df.est[,11] * land.maps[[10]]) +     
+    (df.est[,12] * land.maps[[11]]) +
+    (df.est[,13] * land.maps[[12]]) +
+    (df.est[,14] * land.maps[[13]]) +       
+    (df.est[,15] * land.maps[[14]]) +
+    (df.est[,16] * land.maps[[15]]) + 
+    (df.est[,17] * land.maps[[16]]) + 
+    (df.est[,18] * land.maps[[17]]) + 
+    (df.est[,19] * land.maps[[18]]) +
+    (df.est[,20] * land.maps[[19]]) +
+    (df.est[,21] * land.maps[[20]]) +       
+    (df.est[,22] * land.maps[[21]])    
+  
+  return(mapBee)
+}
+
+modelRow <- c(1: dim(predsEstimates)[1])
+allMaps <- map(modelRow, predictMap.perModel.fct)
+
+### Calculate mean of all maps
+mapsMean <- app(c(allMaps[[1]],allMaps[[2]],allMaps[[3]],allMaps[[4]],allMaps[[5]],allMaps[[6]],allMaps[[7]],allMaps[[8]],allMaps[[9]],allMaps[[10]],
+                  allMaps[[11]],allMaps[[12]],allMaps[[13]],allMaps[[14]],allMaps[[15]],allMaps[[16]],allMaps[[17]],allMaps[[18]],allMaps[[19]],allMaps[[20]],
+                  allMaps[[21]],allMaps[[22]],allMaps[[23]],allMaps[[24]],allMaps[[25]],allMaps[[26]],allMaps[[27]],allMaps[[28]],allMaps[[29]],allMaps[[30]],
+                  allMaps[[31]],allMaps[[32]],allMaps[[33]],allMaps[[34]],allMaps[[35]],allMaps[[36]],allMaps[[37]],allMaps[[38]],allMaps[[39]],allMaps[[40]],
+                  allMaps[[41]],allMaps[[42]],allMaps[[43]],allMaps[[44]],allMaps[[45]],allMaps[[46]],allMaps[[47]],allMaps[[48]],allMaps[[49]],allMaps[[50]],
+                  allMaps[[51]],allMaps[[52]],allMaps[[53]],allMaps[[54]],allMaps[[55]],allMaps[[56]],allMaps[[57]],allMaps[[58]],allMaps[[59]],allMaps[[60]],
+                  allMaps[[61]],allMaps[[62]],allMaps[[63]],allMaps[[64]],allMaps[[65]],allMaps[[66]],allMaps[[67]],allMaps[[68]],allMaps[[69]],allMaps[[70]],
+                  allMaps[[71]],allMaps[[72]],allMaps[[73]],allMaps[[74]],allMaps[[75]],allMaps[[76]],allMaps[[77]],allMaps[[78]],allMaps[[79]],allMaps[[80]],
+                  allMaps[[81]],allMaps[[82]],allMaps[[83]],allMaps[[84]],allMaps[[85]],allMaps[[86]],allMaps[[87]],allMaps[[88]],allMaps[[89]],allMaps[[90]],
+                  allMaps[[91]],allMaps[[92]],allMaps[[93]],allMaps[[94]],allMaps[[95]],allMaps[[96]],allMaps[[97]],allMaps[[98]],allMaps[[99]],allMaps[[100]]), fun = "mean")
+plot(mapsMean)
+terra::writeRaster(mapsMean, here("Results", "BioIndicator", "Maps", "mean100Lands_Oct19.tif"), filetype = "GTiff", overwrite = TRUE)
+
+```
+&nbsp;     
+ 
+#### Calculate R-squared (model fit) for our model using locations where we have observed bee data
+```{r}
+
+### Import observed bee richness data and save as spatial object
+nameFile <- "BeesMin30_Birds20pct_LandCovers20pct_2007to2021_no1beeSurv_Resid30BeesCells"
+results.30 <- readRDS(here("Results", "BioIndicator", paste0("leapModels_landsOnly_", nameFile, "_20231019.rds")))
+predsEstimates <- results.30[[5]]
+predsEstimates[is.na(predsEstimates)] <- 0
+modelRow <- c(1: dim(predsEstimates)[1])
+df <- results.30[[1]]
+s.100 <- results.30[[3]]
+
+### Function that 
+oneFold.pred.fct <- function(oneFold, df.valid) {
+# oneFold <- five.folds; df.valid <- df.preds
+
+  ### Extract records not part of the testing sample
+  train.DF <- df.valid[which(rownames(df.valid) %ni% as.character(oneFold)), c(1:11)]
+
+  ### Extract records included in one fold, i.e., in the testing sample
+  test.DF <- df.valid[which(rownames(df.valid) %in% oneFold), c(1:11)]
+  
+  ### Create model (like the resulting Leaps model)
+  m.train <- lm(beeResponse ~ ., data = train.DF) 
+  # summary(m.train)
+  
+  ### Predict the bees in the testing samples, based on the bird and land covers
+  m.test <- m.train %>% predict(test.DF)
+  
+  ### Create an output dataframe
+  predObs <- data.frame(loc = oneFold, obs = test.DF[,c(1)], pred = m.test)
+  # print(pred.obs)
+ 
+	return(predObs)
+}
+
+### Function that takes each of the 100 models and calculate model fit and five-fold validation
+fit.5valid.corr.fct <- function(modelRowID) {
+# modelRowID <- 1
+
+  # ### Divide the dataframe into 5 folds
+  set.seed(1234)
+  five.folds <- createFolds(1:nrow(df), k = 5, list = TRUE, returnTrain = FALSE)
+
+  ### Use only predictors that were selected through leaps, for each model
+  m.preds <- predsEstimates[modelRowID, ]
+  m.preds <- m.preds[,which(m.preds != 0)]
+  m.preds <- names(m.preds[-1])
+  df.preds <- df[, c("beeResponse", m.preds)]
+  
+  ### Calculate the prediction accuracy for each grid cell and fold
+  # numPreds <- length(m.preds)
+  allFolds <- map2(.x = five.folds, .y = list(df.preds), .f = oneFold.pred.fct)
+  obsPred <- bind_rows(allFolds, .id = "Fold")
+  
+  ### Extract model fit per model
+  m.lm <- lm(beeResponse ~ ., data = df.preds)
+  beePredict <- m.lm %>% predict(df.preds)
+  beePredict2 <- data.frame(modelNum = modelRowID, cellNum = c(1:nrow(df.preds)), obs = df.preds$beeResponse, preds = beePredict)
+
+  ### Assess predictors' multicollinearity
+  vif.preds <- vif(m.lm)
+  cor.preds <- corrplot(cor(df.preds[,-1]), method = "number")
+  cor.preds <- cor.preds$corrPos
+
+  ### Return results
+  results <- list(obsPred, beePredict2, vif.preds, cor.preds, df.preds)
+  return(results)
+  # remove(modelRow, five.folds, m.preds, df.preds, allFolds, obsPred, R2.100, m.lm, lm.modelNum, m.R2, m.adj.R2)
+}
+
+fit.valid.corr <- map(modelRow, fit.5valid.corr.fct)
+saveRDS(fit.valid.corr, here("Results", "BioIndicator", "LandsOnly_modelFit_5foldValid_VIF_20231019.rds"))
+# fit.valid.corr <- readRDS(here("Results", "BioIndicator", "LandsOnly_modelFit_5foldValid_VIF_20230919.rds"))
+
+### Average all model predictions (created using full sample), across 100 models
+fullSample.obs.preds <- do.call(rbind, lapply(fit.valid.corr, function(element){
+  element[[2]] }))
+mean.preds.perCell <- fullSample.obs.preds %>%
+  # gather(key = cellNum, value = "cellValue") %>%
+  group_by(cellNum) %>%
+  summarise(meanPred = mean(preds), obs = mean(obs), .groups = "drop")
+modelFit.r2 <- 1 - sum((mean.preds.perCell$meanPred - mean.preds.perCell$obs)^2) / sum((mean.preds.perCell$obs - mean(mean.preds.perCell$obs))^2)
+# print(paste("Model fit r-squared is", round(mean.all.m.fit.rsq, 4), "+/- SD", round(sd.all.m.fit.rsq, 4)))
+
+### Calculate the average prediction per location, across the 100 models using five-fold validation predictions
+all.obsPred <- lapply(fit.valid.corr, '[[', 1) 
+all.obsPred <- bind_rows(all.obsPred, .id = "modelNum") 
+meanPred.perLoc <- all.obsPred %>%
+  group_by(loc) %>%
+  summarise(meanPred = mean(pred), obsAtLoc = mean(obs), .groups = "drop") %>%
+  mutate(diff = abs(obsAtLoc - meanPred))
+
+### Calculate validation r-square
+val.R2 <- 1 - sum((meanPred.perLoc$meanPred - meanPred.perLoc$obsAtLoc)^2) / sum((meanPred.perLoc$obsAtLoc - mean(meanPred.perLoc$obsAtLoc))^2)
+
+### Assess the VIF value associated with each model and extract those 
+all.vif <- lapply(fit.valid.corr, '[[', 3) 
+all.vif <- bind_rows(all.vif, .id = "ID")
+max(all.vif[,c(2:22)], na.rm = TRUE) # 3.460462
+all.vif.high <- all.vif[which(all.vif[,-1] > 5),] # None of the models have predictors with a VIF value higher than 5
+
+### Assess the correlation between predictors within each model
+all.corr <- lapply(fit.valid.corr, '[[', 4) 
+all.corr <- bind_rows(all.corr, .id = "ID")
+all.corr <- all.corr[which(all.corr$xName != all.corr$yName),]
+# Here are the most correlated variables, and their model number
+
+
+```
+&nbsp;     
+ 
+#### For each of the 100 lm models, calculate the uncertainty associated with bee richness, considering both predictor selection uncertainty and predictor coefficient uncertainty
+```{r}
+
+### Rasterize the idCells info
+grid.rast <- rasterize(east.grid3, mapsMean, field = "idCells", cover = FALSE)
+
+### Create a stack of rasters that are used at least once in the models
+list.rasters <- c(land.maps, grid.rast)
+stack.preds <- rast(list.rasters)
+# terra::writeRaster(stack.preds, here("Results", "BioIndicator", "Maps", "stackPreds.tif"), filetype = "GTiff", overwrite = TRUE)
+
+### Create dataframe from stack of rasters
+df.aoi.preds <- as.data.frame(stack.preds, row.names = FALSE, cells = TRUE, na.rm = TRUE)
+
+### Save object as shapefile to assess in QGIS
+df.aoi.preds.map <- merge(east.grid3, df.aoi.preds, by = "idCells")
+write.csv(df.aoi.preds, here("Results", "BioIndicator", "predictors_landsOnly_studyArea_20231020.csv"), row.names = FALSE)
+writeVector(df.aoi.preds.map, here("Results", "BioIndicator", "Maps", "predictors_landsOnly_studyArea_20231020.shp"),
+            filetype = "ESRI Shapefile", overwrite = TRUE) # big diagonal squares
+
+### Extract list of linear model summaries
+s.30 <- results.30[[3]]
+df.preds <- results.30[[4]]
+
+extractPredictors.SE.fct <- function(modelNum) {
+# modelNum <- 860
+  
+  ### Extract the predictors
+  spp.30 <- s.30$which[modelNum,]
+  df.30.spp <- df.preds[, c(spp.30)]
+  m.lm.30 <- lm(beeResponse ~ ., data = df.30.spp)
+  lm.30 <- summary(m.lm.30)
+  
+  ### Predict
+  preds.lm <- predict(m.lm.30, newdata = df.aoi.preds, se.fit = TRUE)  # select dataframe with all grid cells for wall-to-wall map of predictions
+
+  ### Select bee richness at quantile value
+  z <- rnorm(1, 0, 1)
+  values <- preds.lm$se.fit * z + preds.lm$fit
+  
+  ### Return
+  df <- data.frame(idCells = df.aoi.preds$idCells, locID = c(1:length(values)), modelNum = modelNum, pbBee = values, meanBee = preds.lm$fit, seBee = preds.lm$se.fit) # pb for parametric bootstrap
+  
+  return(df)
+}
+
+modelNum <- c(822:921)
+results <- map_dfr(modelNum, extractPredictors.SE.fct) # May take a somewhat long time to run
+
+### Calculate the confidence interval at each location (this also takes a somewhat long time to run)
+CI.bees <- results %>%
+  group_by(idCells) %>%  
+  summarise(lowCI = quantile(pbBee, 0.05), highCI = quantile(pbBee, 0.95), meanBee = mean(pbBee), sdBee = sd(pbBee), .groups = "drop") %>%
+  mutate(coefVar = sdBee / abs(meanBee))
+
+### Export results
+write.csv(CI.bees, here("Results", "BioIndicator", "beeRich_uncertainty_atLocs_landsOnly_20231020.csv"), row.names = FALSE)
+CI.bees.map <- merge(east.grid3, CI.bees, by = "idCells")
+writeVector(CI.bees.map, here("Results", "BioIndicator", "Maps", "beeRich_uncertainty_atLocs_landsOnly_20231020.shp"),
+            filetype = "ESRI Shapefile", overwrite = TRUE) 
+CI.bees.map.cv.rast <- rasterize(CI.bees.map, mapsMean, field = "coefVar", cover = FALSE)
+terra::writeRaster(CI.bees.map.cv.rast, here("Results", "BioIndicator", "Maps", "beeLandCoefVar_Oct20.tif"), filetype = "GTiff", overwrite = TRUE)
+plot(CI.bees.map.cv.rast)
+CI.bees.map.sd.rast <- rasterize(CI.bees.map, mapsMean, field = "sdBee", cover = FALSE)
+terra::writeRaster(CI.bees.map.sd.rast, here("Results", "BioIndicator", "Maps", "beeLandSD_Oct20.tif"), filetype = "GTiff", overwrite = TRUE)
+CI.bees.map.lowCI.rast <- rasterize(CI.bees.map, mapsMean, field = "lowCI", cover = FALSE)
+terra::writeRaster(CI.bees.map.lowCI.rast, here("Results", "BioIndicator", "Maps", "beeLandLowCI_Oct20.tif"), filetype = "GTiff", overwrite = TRUE)
+CI.bees.map.highCI.rast <- rasterize(CI.bees.map, mapsMean, field = "highCI", cover = FALSE)
+terra::writeRaster(CI.bees.map.highCI.rast, here("Results", "BioIndicator", "Maps", "beeLandHiCI_Oct20.tif"), filetype = "GTiff", overwrite = TRUE)
+
+```

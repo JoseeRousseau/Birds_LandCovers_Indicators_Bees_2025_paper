@@ -1,0 +1,663 @@
+---
+title: "CombineBeeDatasets_ChesshireSCANGBIF_20231004"
+author: "Josee Rousseau"
+date: "2023-10-04"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_depth: '3'
+  html_notebook:
+    fig_caption: no
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+always_allow_html: yes
+---
+
+
+Program name:     CombineBeeDatasets_ChesshireSCANGBIF_20231004.rmd 
+
+Program location: ./BioD_Pollination/Programs/BeeData_Conservation_paper/Explore_Format_BeeData
+
+Program goal:     Combine the Chesshire et al. (2023), 2021 GBIF, and 2021 SCAN data
+
+Last modified:		October 10, 2023, by Josee Rousseau
+
+
+```{r libraries, echo = FALSE, warning = FALSE, message = FALSE}
+
+library(here)
+library(rgbif) # use only if processing new gbif dataset
+library(dplyr)
+library(spData)
+library(sf)
+library(tidyverse)
+library(purrr)
+library(readxl)
+library(arsenal)
+
+'%!in%' <- function(x,y)!('%in%'(x,y))
+```
+&nbsp;     
+ 
+#### Import Chesshire et al. (2023), SCAN, and GBIF datasets
+#### Make sure they have the same columns
+#### For SCAN and GBIF, select 2021 data
+```{r}
+
+### Import GBIF records
+gbif <- occ_download_get(key = "0431196-210914110416597", overwrite = TRUE) %>%
+    occ_download_import(here("Data", "BeeData_Conservation_paper", "GBIF_Bees6Families_USA_1992to2021_20220824"))  # , na.strings = c("", NA)
+# 1,303,805 rows and 257 variables; file size 366.09 MB
+
+### Remove empty columns from GBIF
+gbif <- gbif[ , colSums(is.na(gbif)) != nrow(gbif )]
+# 1,303,805 rows and 177 variables
+
+### Check if the year info could be added to any record missing year.
+### Assess quality of yeqr information
+summary(gbif$year)
+   # Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+   # 1992    2006    2012    2011    2018    2021 
+# All GBIF records had year information (which makes sense since it was part of the data query)
+# All GBIF records also included month and day information
+
+### Select records from 2021
+gbif.yr <- gbif[which(gbif$year == 2021), ] # 110,315 records; 177 variables
+remove(gbif)
+
+### Import SCAN records (previously filtered)
+scan.yr <- read.csv(here("Data", "BeeData_Conservation_paper", "SCAN_Bees_2021_USA_20231004.csv")) # 4,304 records; 89 variables
+
+### Import Paige Chesshire dataset
+chesshire <- read.csv(here("Data/BeeData_Conservation_paper/Chesshire_2023/contiguousRecords_high_Only.csv"))
+# names(chesshire)
+# 1,923,814 records and 106 variables in paper from Paige Chesshire
+
+### Compare the column names of Chesshire, with SCAN and GBIF
+# diff.Ch.scan <- comparedf(chesshire, scan.yr)
+# View(diff.Ch.scan$vars.summary)
+# diff.Ch.gbif <- comparedf(chesshire, gbif.yr)
+# View(diff.Ch.gbif $vars.summary)
+
+### Combine the SCAN and GBIF, making sure the column names matches those present in PC
+# names(scan.yr)
+# SCAN$datasetKey <- NA; SCAN$organismID <- NA; SCAN$locationID <- NA
+
+scan.yr2 <- scan.yr[, c("scientificName", "id", "institutionCode", "collectionCode", "ownerInstitutionCode", 
+                        "basisOfRecord", "occurrenceID", "catalogNumber", "otherCatalogNumbers", "kingdom", 
+                        "phylum", "class", "order", "family", "taxonID", 
+                        "scientificNameAuthorship", "genus", "specificEpithet", "taxonRank", "infraspecificEpithet",  
+                        "identifiedBy", "dateIdentified", "identificationReferences", "identificationRemarks", "taxonRemarks", 
+                        "identificationQualifier", "typeStatus", "recordedBy", "recordNumber", "eventDate", 
+                        "year", "month", "day", "startDayOfYear", "endDayOfYear", 
+                        "verbatimEventDate", "occurrenceRemarks", "habitat", "fieldNumber", "informationWithheld", 
+                        "dataGeneralizations", "dynamicProperties", "associatedTaxa", "associatedOccurrences", "reproductiveCondition", 
+                        "establishmentMeans", "lifeStage", "sex", "individualCount", "samplingProtocol", 
+                        "samplingEffort", "preparations", "country", "stateProvince", "county", 
+                        "municipality", "locality", "locationRemarks", "decimalLatitude", "decimalLongitude", 
+                        "geodeticDatum", "coordinateUncertaintyInMeters", "verbatimCoordinates", "georeferencedBy", "georeferenceProtocol", 
+                        "georeferenceSources", "georeferenceVerificationStatus", "georeferenceRemarks", "minimumElevationInMeters", "maximumElevationInMeters",
+                        "minimumDepthInMeters", "maximumDepthInMeters", "verbatimDepth", "verbatimElevation", "disposition", 
+                        "language", "recordEnteredBy", "modified", "recordId", "references")]
+ 
+gbif.yr2 <- gbif.yr[, c("scientificName", "institutionCode", "collectionCode", "ownerInstitutionCode", "collectionID", 
+                        "basisOfRecord", "occurrenceID", "catalogNumber", "otherCatalogNumbers", "kingdom", 
+                        "phylum", "class", "order", "family", "taxonID", 
+                        "genus", "specificEpithet", "taxonRank", "infraspecificEpithet", "identifiedBy", 
+                        "dateIdentified", "identificationReferences", "identificationRemarks", "taxonRemarks", "identificationQualifier", 
+                        "typeStatus", "recordedBy", "recordNumber", "eventDate", "year", 
+                        "month", "day", "startDayOfYear", "endDayOfYear", "verbatimEventDate", 
+                        "occurrenceRemarks", "habitat", "fieldNumber", "informationWithheld", "dataGeneralizations", 
+                        "dynamicProperties", "associatedTaxa", "associatedOccurrences", "reproductiveCondition", "establishmentMeans", 
+                        "lifeStage", "sex", "individualCount", "samplingProtocol", "samplingEffort", 
+                        "preparations", "stateProvince", "county", "municipality", "locality", 
+                        "locationRemarks", "decimalLatitude", "decimalLongitude", "coordinateUncertaintyInMeters", "georeferencedBy", 
+                        "georeferenceProtocol", "georeferenceSources", "georeferenceVerificationStatus", "georeferenceRemarks", "verbatimElevation", 
+                        "disposition", "language", "modified", "rights", "rightsHolder", 
+                        "accessRights", "references", "gbifID")]
+ 
+### Add to each some columns that are in the Chesshire dataset but missing in scan or gbif
+scan.yr2$collectionID <- NA; scan.yr2$rights <- NA; scan.yr2$rightsHolder <- NA
+scan.yr2$accessRights <- NA; scan.yr2$finalLatitude <- NA; scan.yr2$finalLongitude <- NA
+scan.yr2$Identifier_Level <- NA; scan.yr2$PrecisionLevel <- NA; scan.yr2$Source <- "SCAN"
+scan.yr2$geolocate_LocalityID <- NA; scan.yr2$geolocate_ResultID <- NA; scan.yr2$geolocate_Latitude <- NA
+scan.yr2$geolocate_Longitude <- NA; scan.yr2$geolocate_UncertaintyRadiusMeters <- NA; scan.yr2$geolocate_UncertaintyPolygon <- NA
+scan.yr2$geolocate_Score <- NA; scan.yr2$geolocate_Precision <- NA; scan.yr2$geolocate_ParsePattern <- NA
+scan.yr2$geolocate_locFieldUsed <- NA; scan.yr2$geolocate_NumResults <- NA; scan.yr2$wordCount <- NA
+scan.yr2$finalName <- NA;  scan.yr2$CountryName <- NA
+gbif.yr2$scientificNameAuthorship <- NA;  gbif.yr2$country <- NA;  gbif.yr2$geodeticDatum <- NA
+gbif.yr2$verbatimCoordinates <- NA;  gbif.yr2$minimumElevationInMeters <- NA;  gbif.yr2$maximumElevationInMeters <- NA
+gbif.yr2$minimumDepthInMeters <- NA;  gbif.yr2$maximumDepthInMeters <- NA;  gbif.yr2$verbatimDepth <- NA
+gbif.yr2$recordEnteredBy <- NA;  gbif.yr2$recordId <- NA;  gbif.yr2$finalLatitude <- NA
+gbif.yr2$finalLongitude <- NA;  gbif.yr2$Identifier_Level <- NA;  gbif.yr2$PrecisionLevel <- NA
+gbif.yr2$Source <- "GBIF";  gbif.yr2$geolocate_LocalityID <- NA;  gbif.yr2$geolocate_ResultID <- NA
+gbif.yr2$geolocate_Latitude <- NA;  gbif.yr2$geolocate_Longitude <- NA;  gbif.yr2$geolocate_UncertaintyRadiusMeters <- NA
+gbif.yr2$geolocate_UncertaintyPolygon <- NA;  gbif.yr2$geolocate_Score <- NA;  gbif.yr2$geolocate_Precision <- NA
+gbif.yr2$geolocate_ParsePattern <- NA;  gbif.yr2$geolocate_locFieldUsed <- NA;  gbif.yr2$geolocate_NumResults <- NA
+gbif.yr2$wordCount <- NA;  gbif.yr2$finalName <- NA;  gbif.yr2$CountryName <- NA
+gbif.yr2$id <- gbif.yr2$gbifID
+gbif.yr2 <- gbif.yr2[ , !(names(gbif.yr2) %in% "gbifID")]
+
+### Check that SCAN and GBIF have the same columns
+# diff.scan.gbif <- comparedf(scan.yr2, gbif.yr2)
+# View(diff.scan.gbif$vars.summary) # they now have the same variables
+
+all.SCAN.GBIF <- rbind(scan.yr2, gbif.yr2)
+# 114,619 records
+
+remove(gbif.yr, gbif.yr2, scan.yr, scan.yr2)
+# remove(diff.Ch.gbif, diff.Ch.scan, diff.scan.gbif)
+
+```
+&nbsp;     
+ 
+#### SCAN and GBIF could have duplicates.
+#### Also, Chesshire et al. contains a few 2021 records that could be duplicates with the downloaded 2021 SCAN and GBIF records.
+#### To select non-duplcated records, I remove one copy of records with same catalogNumber and InstitutionCode in both datasets
+```{r}
+
+### Identify duplicated unique records between SCAN and GBIF using institutionCode and catalogNumber
+# dupRows <- allRecords[duplicated(allRecords[,c(3,8)]),]
+dupRows2 <- all.SCAN.GBIF[all.SCAN.GBIF$institutionCode %in% all.SCAN.GBIF$institutionCode[duplicated(all.SCAN.GBIF[,c(3,8)])] & all.SCAN.GBIF$catalogNumber %in% all.SCAN.GBIF$catalogNumber[duplicated(all.SCAN.GBIF[,c(3,8)])],]
+dupRows2b <- dupRows2 %>%
+  group_by(institutionCode, catalogNumber) %>%
+  summarise(n = n(), .groups = "drop")
+
+### Keep only non duplicates
+SCAN.GBIF.1 <-  all.SCAN.GBIF[!(duplicated(all.SCAN.GBIF[,c(3,8)])),]
+# 111,238 records; removed duplicated 3,305 records
+
+### Also need to remove 2021 records from SCAN and GBIF that are present in Chesshire et al.
+dupRows3 <- intersect(SCAN.GBIF.1[,c("institutionCode", "catalogNumber")], chesshire[,c("institutionCode", "catalogNumber")])
+# 23 records were duplicated between Chesshire et al. and the 2021 data, most from iNaturalist (beside 1 records which has blank institutionCode and catalogNumber), 
+SCAN.GBIF2 <- setdiff(SCAN.GBIF.1[,c("institutionCode", "catalogNumber")], chesshire[,c("institutionCode", "catalogNumber")])
+SCAN.GBIF <- SCAN.GBIF.1[which(SCAN.GBIF.1$institutionCode %in% SCAN.GBIF2$institutionCode & 
+                                     SCAN.GBIF.1$catalogNumber %in% SCAN.GBIF2$catalogNumber),]
+# 111,216 records
+
+remove(dupRows2, dupRows2b, dupRows3, all.SCAN.GBIF, SCAN.GBIF.1, SCAN.GBIF2)
+
+```
+&nbsp;     
+ 
+#### Make sure records are in USA and have lat/long info
+```{r}
+
+### Select countries
+region <- st_transform(us_states, crs = 4326)
+
+### Assess how many records don't have lat/long but do have locality (to copy filters made by Paige Chesshire)
+# localBees <- SCAN.GBIF[which( (is.na(SCAN.GBIF$decimalLongitude) | is.na(SCAN.GBIF$decimalLatitude)) & !is.na(SCAN.GBIF$locality) ),]
+# View(localBees[,c("scientificName", "finalName", "eventDate", "locality", "municipality", "county", "stateProvince", "locationRemarks", "decimalLatitude", "decimalLongitude", "georeferencedBy" )])
+
+### Save latitude and longitude in new columns, to records updated values
+SCAN.GBIF$finalLatitude <- SCAN.GBIF$decimalLatitude
+SCAN.GBIF$finalLongitude <- SCAN.GBIF$decimalLongitude
+
+### 4 records had a meaningful locality and could be given a lat/long 
+SCAN.GBIF$finalLatitude[(SCAN.GBIF$scientificName == "Bombus morrisoni" & SCAN.GBIF$locality == "Zion National Park")] <- 37.298141
+SCAN.GBIF$finalLongitude[(SCAN.GBIF$scientificName == "Bombus morrisoni" & SCAN.GBIF$locality == "Zion National Park")] <- -113.026309
+SCAN.GBIF$finalLatitude[(SCAN.GBIF$scientificName == "Bombus auricomus" & SCAN.GBIF$locality == "Anderson Prairie")] <- 43.315397
+SCAN.GBIF$finalLongitude[(SCAN.GBIF$scientificName == "Bombus auricomus" & SCAN.GBIF$locality == "Anderson Prairie")] <- -91.799812
+SCAN.GBIF$finalLatitude[(SCAN.GBIF$scientificName == "Augochloropsis Cockerell, 1897" & SCAN.GBIF$locality == "Chicago, Field Museum of Natural History, Botany elevator")] <- 41.866273
+SCAN.GBIF$finalLongitude[(SCAN.GBIF$scientificName == "Augochloropsis Cockerell, 1897" & SCAN.GBIF$locality == "Chicago, Field Museum of Natural History, Botany elevator")] <- -87.616969
+
+### Set aside records without lat/long
+noLatLong <- SCAN.GBIF[which( is.na(SCAN.GBIF$finalLongitude) | is.na(SCAN.GBIF$finalLatitude)),] 
+# 11 records
+
+### Remove records without lat/long
+with_LatLong <- SCAN.GBIF[which(!is.na(SCAN.GBIF$finalLongitude) | !is.na(SCAN.GBIF$finalLongitude)), ]
+# 111,205 records
+
+### Make sure we are keeping the original lat / long before saving df to spatial object
+with_LatLong$Latitude <- with_LatLong$finalLatitude
+with_LatLong$Longitude <- with_LatLong$finalLongitude
+  
+### Save df as sf
+with_LatLong.shp <- st_as_sf(x = with_LatLong,
+           coords = c("Longitude", "Latitude"),
+           crs = 4326)
+
+### Clip the observation to contiguous USA
+with_LatLong.shp <- sf::st_join(with_LatLong.shp, region, join = st_intersects)
+in.country <- with_LatLong.shp[which(!is.na(with_LatLong.shp$NAME)),] # 107,323 records; which means 3,882 were outside contiguous USA. 
+
+### Assess records outside contiguous USA to make sure they are not just slightly offshore due to lat/long uncertainty
+out.country <- with_LatLong.shp[which(is.na(with_LatLong.shp$NAME)),] # 3,882
+# st_write(out.country, 
+# 				 dsn = here('Data', 'BeeData_Conservation_paper', 'bees_2021SCANGBIF_outCountry_20231011.shp'), 
+# 				 layer = "bees_2021SCANGBIF_outCountry_20231011", driver="ESRI Shapefile")
+### Some records are just offshore, while others are in other countries around the world. Need to snap point to USA using max snapping distance to include points close by
+
+### Snap points slightly offshore to their closest state
+out.country.5070 <- st_transform(out.country, crs = 5070) # Need to transform to a meter unit to use max distance
+region.5070 <- st_transform(region, crs = 5070)
+### The function below was copied from https://gis.stackexchange.com/questions/357661/snapping-points-outside-a-polygon-to-the-polygons-in-r
+st_snap_points = function(x, y, max_dist = 100000) {
+  
+  if (inherits(x, "sf")) n = nrow(x)
+  if (inherits(x, "sfc")) n = length(x)
+  out = do.call(c,
+                lapply(seq(n), function(i) {
+                  nrst = st_nearest_points(st_geometry(x)[i], st_buffer(y, -10)) # JSR: negative border was needed
+                  # nrst = st_nearest_points(st_geometry(x)[i], y)
+                  nrst_len = st_length(nrst)
+                  nrst_mn = which.min(nrst_len)
+                  if (as.vector(nrst_len[nrst_mn]) > max_dist) return(st_geometry(x)[i])
+                  return(st_cast(nrst[nrst_mn], "POINT")[2])
+                })
+  )
+  return(out)
+}
+### Snap points to contiguous USA if within 50 km (large distance to account for points on nearby islands)
+out.country.50 <- st_snap_points(out.country.5070, region.5070, 50000) 
+out.country.50b <- out.country.50 %>% 
+  st_as_sf()
+
+### Combine new points to their bee information and temporarily assign layer to new geometry to intersect with states
+out.country.50b <- cbind(out.country.50b, out.country.5070)
+st_geometry(out.country.50b) <- "x"
+
+### Transform the layer back to original projection and intersect with contiguous states
+out.country.50b <- st_transform(out.country.50b, st_crs(region))
+out.country.50b <- out.country.50b[, -which(names(out.country.50b) %in% c("GEOID", "NAME", "REGION", "AREA", "total_pop_10", "total_pop_15"))]
+out.country.50b <- sf::st_join(out.country.50b, region, join = st_intersects)
+out.country.50b.in <- out.country.50b[which(!is.na(out.country.50b$NAME)),] # 2,493 records can bee added back
+
+### Combined the first set of records that are in USA, with second set of snapped records
+st_geometry(out.country.50b.in) <- "geometry"
+out.country.50b.in <- out.country.50b.in[, -which(names(out.country.50b.in) %in% c("x"))] # Remove snapped lat/long
+st_geometry(in.country) <- NULL
+st_geometry(out.country.50b.in) <- NULL
+in.country2 <- rbind(in.country, out.country.50b.in)
+# 109,816 records
+
+### Some clean up
+remove(SCAN.GBIF, with_LatLong, with_LatLong.shp, region, in.country, out.country, out.country.5070, out.country.50b, out.country.50b.in, out.country.50, region.5070, st_snap_points) # localBees, 
+
+```
+&nbsp;     
+ 
+####** Assess the accuracy of the location information and update if needed
+```{r}
+
+count_decimals = function(x) {
+  
+  #length zero input
+  if (length(x) == 0) return(numeric())
+
+  #count decimals
+  x_nchr = x %>% abs() %>% as.character() %>% nchar() %>% as.numeric()
+  x_int = floor(x) %>% abs() %>% nchar()
+  x_nchr = x_nchr - 1 - x_int
+  x_nchr[x_nchr < 0] = 0
+  
+  df <- data.frame(loc = x, numDecimals = x_nchr)
+
+  return(df)
+}
+
+deciResults.Lat <- map_dfr(in.country2$finalLatitude, count_decimals)
+deciResults.Long <- map_dfr(in.country2$finalLongitude, count_decimals)
+
+### Extract latitude and longitude with 3 or less non-zero padded decimals
+deciResults.Lat3 <- deciResults.Lat$loc[which(deciResults.Lat$numDecimals == 3)]
+deciResults.Long3 <- deciResults.Long$loc[which(deciResults.Long$numDecimals == 3)]
+deciResults.Lat2 <- deciResults.Lat$loc[which(deciResults.Lat$numDecimals == 2)]
+deciResults.Long2 <- deciResults.Long$loc[which(deciResults.Long$numDecimals == 2)]
+deciResults.Lat1 <- deciResults.Lat$loc[which(deciResults.Lat$numDecimals <= 1)]
+deciResults.Long1 <- deciResults.Long$loc[which(deciResults.Long$numDecimals <= 1)]
+deciResults.Lat0 <- deciResults.Lat$loc[which(deciResults.Lat$numDecimals <= 0)]
+deciResults.Long0 <- deciResults.Long$loc[which(deciResults.Long$numDecimals <= 0)]
+
+### Extract records that have 3 or less decimals for both latitude and longitude
+beesWithLatLong.3decis <- in.country2[which(in.country2$finalLatitude %in% deciResults.Lat3 & 
+                                                  in.country2$finalLongitude %in% deciResults.Long3),]
+# 111 records using 3 decimals (precise within 110 meters)
+beesWithLatLong.2decis <- in.country2[which(in.country2$finalLatitude %in% deciResults.Lat2 & 
+                                                  in.country2$finalLongitude %in% deciResults.Long2),]
+# 97 records using 2 decimals (precise within 1.1 km)
+beesWithLatLong.1decis <- in.country2[which(in.country2$finalLatitude %in% deciResults.Lat1 & 
+                                                  in.country2$finalLongitude %in% deciResults.Long1),]
+# 3 records using 1 decimals (precise within 11.1 km)
+beesWithLatLong.0decis <- in.country2[which(in.country2$finalLatitude %in% deciResults.Lat0 & 
+                                                  in.country2$finalLongitude %in% deciResults.Long0),]
+# 0 records using 0 decimals (precise within 111 km)
+
+### Create new columns for coordinateUncertaintyInMeters to records updated values
+in.country2$finalCoordinateUncertaintyInMeters <- in.country2$coordinateUncertaintyInMeters
+
+### For the records with 3 or less decimals, let's make sure the coordinateUncertaintyInMeters reflects that information
+in.country2 <- in.country2 %>%
+  mutate(finalCoordinateUncertaintyInMeters = ifelse(finalLatitude %in% deciResults.Lat3 & 
+                                                  finalLongitude %in% deciResults.Long3 & 
+                                                  is.na(coordinateUncertaintyInMeters), 110, finalCoordinateUncertaintyInMeters),
+         finalCoordinateUncertaintyInMeters = ifelse(finalLatitude %in% deciResults.Lat2 & 
+                                                  finalLongitude %in% deciResults.Long2 & 
+                                                  is.na(coordinateUncertaintyInMeters), 1100, finalCoordinateUncertaintyInMeters),
+         finalCoordinateUncertaintyInMeters = ifelse(finalLatitude == 31.2 & 
+                                                  finalLongitude == -97.5 & 
+                                                  is.na(coordinateUncertaintyInMeters), 11100, finalCoordinateUncertaintyInMeters),
+         finalCoordinateUncertaintyInMeters = ifelse(finalLatitude == 39.4 & 
+                                                  finalLongitude == -77.5 & 
+                                                  is.na(coordinateUncertaintyInMeters), 11100,  finalCoordinateUncertaintyInMeters),
+         finalCoordinateUncertaintyInMeters = ifelse(finalLatitude == 34.2 & 
+                                                  finalLongitude == -84.1 & 
+                                                  is.na(coordinateUncertaintyInMeters), 11100, finalCoordinateUncertaintyInMeters))
+# View(in.country2[, c("institutionCode", "catalogNumber", "decimalLatitude", "finalLatitude", "decimalLongitude", "finalLongitude", "coordinateUncertaintyInMeters", "finalCoordinateUncertaintyInMeters")])
+
+remove(beesWithLatLong.3decis, beesWithLatLong.2decis, beesWithLatLong.1decis, beesWithLatLong.0decis, deciResults.Lat, deciResults.Long, deciResults.Lat0, deciResults.Lat1, deciResults.Lat2, deciResults.Lat3, deciResults.Long0, deciResults.Long1, deciResults.Long2, deciResults.Long3)
+
+```
+&nbsp;     
+ 
+#### Remove records with uncertainty in location larger than 15,000 meters    
+```{r coordUncertainty}
+
+ggplot(subset(in.country2, !is.na(finalCoordinateUncertaintyInMeters) & finalCoordinateUncertaintyInMeters <= 100000), aes(finalCoordinateUncertaintyInMeters)) +
+      geom_histogram(position = "identity", fill = "blue", color = "black", alpha = 0.25, bins = 25) +
+	    labs(x = "Uncertainty in meters (m)", y = "Number of records") +
+	    ggtitle("Data loc uncertainty") +
+	    theme_bw()
+
+ggplot(subset(in.country2, !is.na(finalCoordinateUncertaintyInMeters) & finalCoordinateUncertaintyInMeters >= 50000), aes(finalCoordinateUncertaintyInMeters)) +
+      geom_histogram(position = "identity", fill = "blue", color = "black", alpha = 0.25, bins = 25) +
+	    labs(x = "Uncertainty in meters (m)", y = "Number of records") +
+	    ggtitle("Data loc uncertainty") +
+	    theme_bw()
+
+locUnc15km <- in.country2[!is.na(in.country2$finalCoordinateUncertaintyInMeters) & in.country2$finalCoordinateUncertaintyInMeters >= 15000,]
+locUnc50km <- in.country2[!is.na(in.country2$finalCoordinateUncertaintyInMeters) & in.country2$finalCoordinateUncertaintyInMeters >= 50000,]
+locUnc100km <- in.country2[!is.na(in.country2$finalCoordinateUncertaintyInMeters) & in.country2$finalCoordinateUncertaintyInMeters >= 100000,]
+print(paste0("Number of records with location uncertainty greater than 15 km = ", dim(locUnc15km)[1]))
+# [1] "Number of records with location uncertainty greater than 15 km = 11256"
+print(paste0("Number of records with location uncertainty greater than 50 km = ", dim(locUnc50km)[1]))
+# [1] "Number of records with location uncertainty greater than 50 km = 438"
+print(paste0("Number of records with location uncertainty greater than 100 km = ", dim(locUnc100km)[1]))
+# [1] "Number of records with location uncertainty greater than 100 km = 225"
+
+ggplot(subset(in.country2, !is.na(finalCoordinateUncertaintyInMeters) & finalCoordinateUncertaintyInMeters <= 10000), aes(finalCoordinateUncertaintyInMeters)) +
+      geom_histogram(position = "identity", fill = "blue", color = "black", alpha = 0.25, bins = 25) +
+	    labs(x = "Uncertainty in meters (m)", y = "Number of records") +
+	    ggtitle("Data loc uncertainty") +
+	    theme_bw()
+
+### Export the removed records to assess what we are removing
+lowPrec <- in.country2[!is.na(in.country2$finalCoordinateUncertaintyInMeters) & in.country2$finalCoordinateUncertaintyInMeters >= 15000,]
+# View(lowPrec[, c("institutionCode", "catalogNumber", "scientificName", "finalName", "coordinateUncertaintyInMeters", "finalCoordinateUncertaintyInMeters", "year")])
+# 10,849 records: 
+#   - All but 2 records were from iNaturalist (the two exceptions are from institutionCode "CSU", and "TTU")
+#   - The associated species name will need to be cleaned up and summarized to see if there are rare/endangered species.
+#   - This dataframe still includes honeybees
+write.csv(lowPrec, here("Data", "BeeData_Conservation_paper", "SCAN_GBIF_2021_lowLocPrecision_Removed_20231011.csv"), row.names = FALSE)
+
+### Remove records with uncertainty more than 10 km (for now)
+loc.meters <- in.country2[(in.country2$finalCoordinateUncertaintyInMeters < 15000 | is.na(in.country2$finalCoordinateUncertaintyInMeters)),]
+# 98,560 records
+
+remove(in.country2, locUnc100km, locUnc15km, locUnc50km)
+
+```
+&nbsp;     
+ 
+#### Assess the species information in the 2021 SCAN and GBIF datasets and remove honeybees
+```{r, warning = FALSE}
+
+### First remove the honeybee from the dataset
+no.hb <- loc.meters[which(loc.meters$scientificName %!in% c("Apis mellifera", "Apis mellifera Linnaeus, 1758")), ]
+# 73,737 records; There were 24,823 records of honey bee removed
+
+### Clean the scientific name field to remove the taxonomic information and fill in genus and specificEpithet if empty
+no.hb$species <- no.hb$scientificName # save info in a temporary new column
+no.hb$species.test <- ifelse(str_detect(word(no.hb$scientificName, -2), ","),  word(no.hb$scientificName, -2), NA) # Identify records with taxonomic info
+no.hb$species <- ifelse(!is.na(no.hb$species.test), word(no.hb$scientificName , 1  , -3), no.hb$species) # For records with taxonomic info, remove that last two words and update species field
+no.hb$genus <- ifelse(no.hb$genus == "", word(no.hb$scientificName , 1  , 1), no.hb$genus) # Add genus info if missing
+no.hb$specificEpithet <- ifelse(no.hb$specificEpithet == "", word(no.hb$species, 2  , 2), no.hb$specificEpithet) # If absent, add specificEpithet based on the new 'species' field info by selecting second word, if present (selecting second word on scientificName with taxo info would select taxo author instead of specificEpithet)
+no.hb <- no.hb[ , !(names(no.hb) %in% c("species.test", "species"))]
+
+### Identify records that are removed because identified at genus level or are missing species
+no.spp <- no.hb[which(is.na(no.hb$specificEpithet)),]
+# View(data.frame(table(no.spp$scientificName)))
+# View(no.spp[, c("scientificName", "finalName", "genus", "specificEpithet")])
+# 5,698 records
+
+### Remove all records that are not identified to the species level (have only genus or are missing species altogether)
+no.hb <- no.hb[which(!is.na(no.hb$genus) & !is.na(no.hb$specificEpithet)),] # 68,039
+# View(no.hb[, c("scientificName", "finalName", "genus", "specificEpithet")])
+
+### Import list of species edits, published by Paige Chesshire et al. 2023 (Ecography; PC)
+sppEdits.PC <- read_excel(here("Data","BeeData_Conservation_paper","Chesshire_2023","Six Supplemental Data Files","Supp Data 3 Final Name Changes.xlsx"))
+
+### Extract from Chesshire et al. 2023's published dataset (Paige Chesshire; PC), the list of bee species names originally present
+PC.bee.spp <- data.frame(table(chesshire$scientificName))
+names(PC.bee.spp) <- c("scientificName", "count_PC")
+
+### Extract list of bee species in the SCAN/GBIF 2021 dataset based on genus and specificEpithet info
+no.hb$finalName <- paste(no.hb$genus, no.hb$specificEpithet)
+# SCAN.GBIF.bee.spp <- data.frame(table(no.hb$species))
+SCAN.GBIF.bee.spp <- data.frame(table(no.hb$finalName))
+names(SCAN.GBIF.bee.spp) <- c("scientificName", "count_SG")
+
+### Merge the list of bee species from Chesshire and from SCAN/GBIF
+all.bee.spp <- merge(PC.bee.spp, SCAN.GBIF.bee.spp, by = "scientificName", all = TRUE)  # Only 11 records were in 2021 but not in Chesshire
+
+### Extract the species found in 2021 and not present in Chesshire and see if they are in the list of bee species edited by Chesshire
+newBeeSpp <- all.bee.spp[which(is.na(all.bee.spp$count_PC)),] # 11 records
+newBeeSpp.edits <- merge(newBeeSpp, sppEdits.PC, by.x = "scientificName", by.y = "Step 1: Original Scientific Name in Data Download", all.x = TRUE)
+# None of these were species edited by Chesshire
+
+#########################################################################################
+### Looking at the list of species, the following could be edited in the 2021 dataset ###
+#########################################################################################
+
+### Keep copy of records of wrong species
+no.spp2 <- no.hb[which(no.hb$scientificName %in% c("Agapostemon angelicus/texanus", "Lasioglossum sp. TX-3", "Lasioglossum sp. TX-14", "Agapostemon poeyi (Lucas, 1856)", "Hylaeus euxanthus (Cockerell, 1910)")),] # 13 records
+
+### Removed a couple of species that I could tell were not identified to species
+no.hb <- no.hb[which(no.hb$scientificName != "Agapostemon angelicus/texanus"),] # 68,037 records
+no.hb <- no.hb[which(no.hb$scientificName != "Lasioglossum sp. TX-3"),] # 68,036 records
+no.hb <- no.hb[which(no.hb$scientificName != "Lasioglossum sp. TX-14"),] # 68,034 records
+
+### Remove a couple species, as recommended by Bryan Danforth
+no.hb <- no.hb[which(no.hb$scientificName != "Agapostemon poeyi (Lucas, 1856)"),] # 68,031 records
+no.hb <- no.hb[which(no.hb$scientificName != "Hylaeus euxanthus (Cockerell, 1910)"),] # 68,026 records
+
+### Replace a couple of names to fit what Chesshire used, save new name in column finalName
+no.hb <- no.hb %>%
+  mutate(finalName = ifelse(no.hb$finalName == "Agapostemon (Agapostemon) angelicus", "Agapostemon angelicus", finalName),
+         finalName = ifelse(no.hb$finalName == "Anthidium nanum", "Pseudoanthidium nanum", finalName) )
+
+###############################################################################
+### Double check that all 2021 species are matched to a 'finalName' species ###
+###############################################################################
+
+### Extract from Chesshire et al. 2023's published dataset, the list of bee species final names
+PC.finalBee.spp <- rename(count(chesshire, scientificName, finalName), freq = n)
+
+### Extract list of bee species in the SCAN/GBIF 2021 dataset
+SCAN.GBIF.finalBee.spp <- data.frame(table(no.hb$finalName))
+names(SCAN.GBIF.finalBee.spp) <- c("finalName", "count_SG")
+
+### Merge the list of bee species from Chesshire and SCAN/GBIF
+all.finalBee.spp <- merge(PC.finalBee.spp, SCAN.GBIF.finalBee.spp, by = "finalName", all = TRUE)  # 
+
+### Extract the species found in 2021 and see if they are in the list of bee species edited by Chesshire
+### These names are the original names in SCAN/GBIF that do not fit the finalNames in PC
+updateBeeNames <- all.finalBee.spp$finalName[which(is.na(all.finalBee.spp$freq))]
+
+### Find these bee names in PC and the associated final names
+toUpdateBeeNames <- PC.finalBee.spp[which(PC.finalBee.spp$scientificName %in% updateBeeNames),] # 18 records
+
+### Update the final name in SCAN/GBIF to match the associated final name in PC
+no.hb <- no.hb %>%
+  mutate(finalName = ifelse(no.hb$finalName == "Andrena cyanura", "Andrena transnigra", finalName),
+         finalName = ifelse(no.hb$finalName == "Bombus balteatus", "Bombus kirbiellus", finalName),
+         finalName = ifelse(no.hb$finalName == "Bombus flavidus", "Bombus fernaldae", finalName),
+         finalName = ifelse(no.hb$finalName == "Coelioxys alternata", "Coelioxys alternatus", finalName),
+         finalName = ifelse(no.hb$finalName == "Coelioxys germana", "Coelioxys germanus", finalName),
+         finalName = ifelse(no.hb$finalName == "Coelioxys mexicana", "Coelioxys mexicanus", finalName), # new
+         finalName = ifelse(no.hb$finalName == "Coelioxys modesta", "Coelioxys modestus", finalName),
+         finalName = ifelse(no.hb$finalName == "Coelioxys moesta", "Coelioxys moestus", finalName),
+         finalName = ifelse(no.hb$finalName == "Coelioxys octodentata", "Coelioxys octodentatus", finalName),
+         finalName = ifelse(no.hb$finalName == "Eucera pruinosa", "Peponapis pruinosa", finalName), # new
+         finalName = ifelse(no.hb$finalName == "Heriades variolosus", "Heriades variolosa", finalName),
+         finalName = ifelse(no.hb$finalName == "Lasioglossum heterognathum", "Lasioglossum heterognathus", finalName),
+         finalName = ifelse(no.hb$finalName == "Lasioglossum leucocomum", "Lasioglossum leucocomus", finalName),
+         finalName = ifelse(no.hb$finalName == "Lasioglossum lionotum", "Lasioglossum lionotus", finalName),
+         finalName = ifelse(no.hb$finalName == "Lasioglossum zephyrum", "Lasioglossum zephyrus", finalName),
+         finalName = ifelse(no.hb$finalName == "Megachile perhirta", "Megachile perihirta", finalName),
+         finalName = ifelse(no.hb$finalName == "Melissodes tepida", "Melissodes tepidus", finalName),
+         finalName = ifelse(no.hb$finalName == "Xeromelecta interrupta", "Brachymelecta interrupta", finalName),
+         finalName = ifelse(no.hb$finalName == "Xeromelecta larreae", "Brachymelecta larreae", finalName),
+         finalName = ifelse(no.hb$scientificName == "Eucera (Peponapis) pruinosa", "Peponapis pruinosa", finalName))
+
+# "Brachymelecta californica" is correct
+# Leaving "Anthidium florentinum" in 2021 dataset for now
+
+###############################################################################################################
+### Double check that all 2021 species are in the PC dataset beside the new species (Anthidium florentinum) ###
+###############################################################################################################
+
+### Extract list of bee species in the SCAN/GBIF 2021 dataset
+SCAN.GBIF.finalBee.spp2 <- data.frame(table(no.hb$finalName)) # 607 species in 2021 dataset
+names(SCAN.GBIF.finalBee.spp2) <- c("finalName", "count_SG")
+write.csv(SCAN.GBIF.finalBee.spp2, here("data", "BeeData_Conservation_paper", "SCAN_GBIF_2021_beeSpecies_20231011.csv"), row.names = FALSE)
+
+### Merge the list of bee species from Chesshire and SCAN/GBIF
+all.finalBee.spp2 <- merge(PC.finalBee.spp, SCAN.GBIF.finalBee.spp2, by = "finalName", all = TRUE)  
+
+### Create species list to import in GBIF and get additional information about each species (family, author, etc)
+uniqueSpp <- data.frame(unique(all.finalBee.spp2$finalName)) # 3,159 species present in dataset
+uniqueSpp$source <- "in dataset"
+names(uniqueSpp) <- c("scientificName", "source")
+
+### Need to add the 60 species that were removed from Chesshire dataset (and not found in 2021)
+spp.removed <- read_excel(here("Data","BeeData_Conservation_paper","Chesshire_2023", "Six Supplemental Data Files", "Supp Data 2 Species with Only Imprecise Data, Removed.xlsx"))
+spp.removed$source <- "Removed, imprecise location"
+spp.removed <- spp.removed[, c("finalName", "source")]
+names(spp.removed) <- c("scientificName", "source")
+uniqueSpp <- rbind(uniqueSpp, spp.removed) # 3,219 species
+
+### Export list of species
+write.csv(uniqueSpp, here("Data","BeeData_Conservation_paper", "list3219BeeSpp_fromR_20231011.csv"), row.names = FALSE)
+
+### Clean up
+remove(all.bee.spp, all.finalBee.spp, all.finalBee.spp2, newBeeSpp, newBeeSpp.edits, PC.bee.spp, PC.finalBee.spp, SCAN.GBIF.bee.spp, SCAN.GBIF.finalBee.spp, SCAN.GBIF.finalBee.spp2, sppEdits.PC, toUpdateBeeNames, updateBeeNames) # loc.meters, 
+
+```
+&nbsp;     
+ 
+#### Append 2021 records from SCAN and GBIF to Chesshire et al. dataset
+```{r}
+
+### Compare the columns in PC versus SCAN.GBIF
+# diff.PC.SCAN.GBIF <- comparedf(PC.2020, no.hb)
+# View(diff.PC.SCAN.GBIF$vars.summary)
+
+### There are a few differences between the columns in PC and in SCAN.GBIF. These needs to match
+chesshire$finalCoordinateUncertaintyInMeters <- NA
+no.hb$X.2 <- NA; no.hb$X.1 <- NA; no.hb$X <- NA
+
+PC <- chesshire[, c("scientificName", "id", "institutionCode", "collectionCode", "ownerInstitutionCode", "collectionID", 
+              "basisOfRecord", "occurrenceID", "catalogNumber", "otherCatalogNumbers", "kingdom", "phylum", "class", 
+              "order", "family", "taxonID", "scientificNameAuthorship", "genus", "specificEpithet", "taxonRank",
+              "infraspecificEpithet", "identifiedBy", "dateIdentified", "identificationReferences", "identificationRemarks",               
+              "taxonRemarks", "identificationQualifier", "typeStatus", "recordedBy", "recordNumber", "eventDate",                   
+              "year", "month", "day", "startDayOfYear", "endDayOfYear", "verbatimEventDate", "occurrenceRemarks", 
+              "habitat", "fieldNumber", "informationWithheld", "dataGeneralizations", "dynamicProperties", "associatedTaxa" , 
+              "associatedOccurrences", "reproductiveCondition", "establishmentMeans", "lifeStage", "sex", "individualCount", 
+              "samplingProtocol", "samplingEffort", "preparations", "country", "stateProvince", "county", "municipality", 
+              "locality",  "locationRemarks", "decimalLatitude", "decimalLongitude", "geodeticDatum", "coordinateUncertaintyInMeters",  
+              "verbatimCoordinates", "georeferencedBy", "georeferenceProtocol" , "georeferenceSources", "georeferenceVerificationStatus", 
+              "georeferenceRemarks", "minimumElevationInMeters", "maximumElevationInMeters", "minimumDepthInMeters", 
+              "maximumDepthInMeters", "verbatimDepth", "verbatimElevation", "disposition", "language", "recordEnteredBy", 
+              "modified", "rights", "rightsHolder", "accessRights", "recordId", "references" , "finalLatitude", "finalLongitude", 
+              "Identifier_Level", "PrecisionLevel", "Source",  "geolocate_LocalityID", "geolocate_ResultID", "geolocate_Latitude", 
+              "geolocate_Longitude", "geolocate_UncertaintyRadiusMeters",  "geolocate_UncertaintyPolygon", "geolocate_Score", 
+              "geolocate_Precision",  "geolocate_ParsePattern", "geolocate_locFieldUsed", "geolocate_NumResults", "wordCount", 
+              "finalName", "CountryName", "finalCoordinateUncertaintyInMeters", "X.2", "X.1", "X")]
+
+# names(no.hb)
+SCAN.GBIF <- no.hb[, c("scientificName", "id", "institutionCode", "collectionCode", "ownerInstitutionCode", "basisOfRecord", "occurrenceID", "catalogNumber", "otherCatalogNumbers", "kingdom", "phylum", "class", "order", "family", "taxonID", "scientificNameAuthorship", "genus", "specificEpithet", "taxonRank", "infraspecificEpithet", "identifiedBy", "dateIdentified", "identificationReferences", "identificationRemarks", "taxonRemarks", "identificationQualifier", "typeStatus", "recordedBy", "recordNumber", "eventDate", "year", "month", "day", "startDayOfYear", "endDayOfYear", "verbatimEventDate", "occurrenceRemarks", "habitat", "fieldNumber", "informationWithheld", "dataGeneralizations", "dynamicProperties", "associatedTaxa", "associatedOccurrences", "reproductiveCondition", "establishmentMeans", "lifeStage", "sex", "individualCount", "samplingProtocol", "samplingEffort", "preparations", "country", "stateProvince", "county", "municipality", "locality", "locationRemarks", "decimalLongitude", "decimalLatitude", "geodeticDatum", "coordinateUncertaintyInMeters", "verbatimCoordinates", "georeferencedBy", "georeferenceProtocol", "georeferenceSources", "georeferenceVerificationStatus", "georeferenceRemarks", "minimumElevationInMeters", "maximumElevationInMeters", "minimumDepthInMeters", "maximumDepthInMeters", "verbatimDepth", "verbatimElevation", "disposition", "language", "recordEnteredBy", "modified", "recordId", "references", "collectionID", "rights", "rightsHolder", "accessRights", "finalLatitude", "finalLongitude", "Identifier_Level", "PrecisionLevel", "Source", "geolocate_LocalityID", "geolocate_ResultID", "geolocate_Latitude", "geolocate_Longitude", "geolocate_UncertaintyRadiusMeters",  "geolocate_UncertaintyPolygon", "geolocate_Score", "geolocate_Precision",  "geolocate_ParsePattern", "geolocate_locFieldUsed", "geolocate_NumResults", "wordCount", "finalName", "CountryName", "finalCoordinateUncertaintyInMeters", "X.2", "X.1", "X")]
+
+### Double check one more time that the columns match
+# diff.PC.SCAN.GBIF2 <- comparedf(PC, SCAN.GBIF)
+# View(diff.PC.SCAN.GBIF2$vars.summary)
+
+### Combine Chesshire and 2021 datasets
+allBees <- rbind(PC, SCAN.GBIF) # 1,991,840 records: 1,923,814 from Chesshire up to 2020 and 68,026 for SCAN and GBIF 2021
+
+
+### Export dataset
+write.csv(allBees, here("Data", "BioIndicator", "bees_Chesshire2021_USA_20231011.csv"), row.names = FALSE) # 1,991,840 records
+# write.csv(allBees, here("Data", "BioIndicator", "bees_Chesshire2021_USA_20231010.csv"), row.names = FALSE) # 1,990,390 records
+# write.csv(allBees, here("Data", "BioIndicator", "bees_Chesshire2021_USA_20231009.csv"), row.names = FALSE) # 1,989,472 records
+# write.csv(allBees, here("Data", "Bioindicator_Chesshire2021_checklists_easternHalfUSA", "bees_Chesshire2021_USA_20230627.csv"), row.names = FALSE) # 1,990,407 records
+# The difference between the June 27 and October 9 version are the 2021 records in Chesshire that had not been removed in June
+
+write.csv(allBees, here("Data", "BeeData_Conservation_paper", "bees_Chesshire2021_USA_20231011.csv"), row.names = FALSE) # 1,991,840 write.csv(allBees, here("Data", "BeeData_Conservation_paper", "bees_Chesshire2021_USA_20231010.csv"), row.names = FALSE) # 1,990,390 records
+# write.csv(allBees, here("Data", "BeeData_Conservation_paper", "bees_Chesshire2021_USA_20231009.csv"), row.names = FALSE) # 1,989,472 records
+
+```
+&nbsp;     
+ 
+#### Combine and export the 2021 records that were thrown out
+```{r}
+
+### Make sure all data frames with 'bad' records have the same columns
+# diff.removed <- comparedf(no.spp, noLatLong)
+# View(diff.removed$vars.summary)
+noLatLong$GEOID <- NA; noLatLong$REGION <- NA; noLatLong$AREA <- NA
+noLatLong$total_pop_10 <- NA; noLatLong$total_pop_15 <- NA; 
+noLatLong$finalCoordinateUncertaintyInMeters <- NA; noLatLong$NAME <- NA
+
+### Data frame of records thrown out for SCAN and GBIF 2021
+badRecords <- rbind(lowPrec, no.spp, no.spp2, noLatLong) # 11,256, 5,698, 13, 11 records respectively; 
+# After removing duplicates, we had x SCAN and GBIF records for 2021. 16,979 of those records did not meet minimum quality threshold
+
+### Remove honeybees from these
+loc.meters[which(loc.meters$scientificName %!in% c("Apis mellifera", "Apis mellifera Linnaeus, 1758")), ]
+badRecords.no.hb <- badRecords[which(badRecords$scientificName %!in% c("Apis mellifera", "Apis mellifera Linnaeus, 1758")), ]
+# 14,564 records (removed 2,415 honey bee records)
+
+### Export 
+write.csv(badRecords.no.hb, here("Data", "BeeData_Conservation_paper", "BeeRecords_ThrownOut_SCANGBIF2021_20231011.csv"), row.names = FALSE)
+# 68,026 records for 2021 + 14,564 records = 82,590; 14,564/82,590*100 = 17.6%
+
+### Number and percent of records removed for lack of location, species, or low meter uncertainty
+(5698+13) / 82590 * 100  # 6.9 % of records removed because lacked species
+11 / 82590 * 100  # 0.01 % of records removed because lacked latitude and/or longitude (includes some records of honeybee) 
+8845 / 82590 * 100  # 10.7 % of records removed low geographical precision (take 11,256 and select 'mellifera' records; 2,416 - 5 records are Apis Mellifera; 11,256 - 2,411 = 8,845)
+
+
+```
+&nbsp;     
+ 
+#### Create a table with number of records per institutionCode and year
+```{r}
+
+### Summarize the data
+num.perInst.perYear <- allBees %>%
+  group_by(institutionCode, year) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  spread(key = year, value = n)
+
+### Extract vector of list of years. This will be used to update order of columns
+allYears <- sort(unique(allBees$year), decreasing = TRUE)
+
+### Sort the columns
+num.perInst.perYear <- num.perInst.perYear[, c("institutionCode", "<NA>", allYears)]
+
+### Replace all NAs by "."
+num.perInst.perYear <- num.perInst.perYear %>%
+  mutate(across(everything(), as.character))
+num.perInst.perYear[is.na(num.perInst.perYear)] <- "."
+
+### Export
+write.csv(num.perInst.perYear, here("Data", "BeeData_Conservation_paper", "numRecords_perInstitution_perYear_20231011.csv"), row.names = FALSE)
+  
+```
+

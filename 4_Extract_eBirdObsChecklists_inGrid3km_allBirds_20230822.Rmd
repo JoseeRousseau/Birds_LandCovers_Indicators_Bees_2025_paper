@@ -1,0 +1,360 @@
+---
+title: "Extract_eBirdObsChecklists_InGrid3km_20230822"
+author: "Josee Rousseau"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_depth: '3'
+  html_notebook:
+    fig_caption: no
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+always_allow_html: yes
+---
+
+
+Program name:     Extract_eBirdObsChecklists_InGrid3km_20230822.Rmd
+
+Program location: "./Programs/BioIndicator/Extract_BeeBird_data"
+
+Program goal:     Extract bird checklists that overlap grid cells with bee data. 
+
+Last modified:		October 17, 2023 by Josee Rousseau
+
+
+```{r libraries, echo = FALSE, warning = FALSE, message = FALSE}
+
+library(here)
+library(dplyr)
+library(tidyr)
+library(auk)
+library(lubridate)
+library(purrr)
+library(sf)
+library(spData)
+library(chunked)
+
+'%notin%' <- Negate('%in%')
+
+```
+&nbsp;     
+ 
+#### Import needed datasets
+```{r}
+
+### Identify the eBird observation and sampling EBD
+ebd_obs <- auk_ebd("/Volumes/BirdsBees/Data/eBird/World/ebd_relApr-2022/ebd_relApr-2022.txt")
+ebd_sampl <- auk_sampling("/Volumes/BirdsBees/Data/eBird/World/ebd_sampling_relApr-2022/ebd_sampling_relApr-2022.txt")
+                          
+### Identify the output file names
+samplEast <- "/Volumes/BirdsBees/Data/eBird/Filtered/eBirdSamples_Eastern_2007to2021_20230301.txt"
+obsEast <- "/Volumes/BirdsBees/Data/eBird/Filtered/eBirdObs_Eastern_2007to2021_20230307.txt"
+obsEast_small <- "/Volumes/BirdsBees/Data/eBird/Filtered/eBirdObs_Eastern_FewCols_2007to2021_20230307.txt"
+
+### List of states
+states <- c("West Virginia", "Virginia","Kentucky", "Tennessee", "North Carolina", "South Carolina", "Georgia",
+            "Alabama", "Maryland", "Mississippi", "Connecticut", "Delaware", "Massachusetts", "New Hampshire",
+            "New Jersey", "New York", "Pennsylvania", "Rhode Island", "Vermont", "District of Columbia",
+            "North Dakota", "South Dakota", "Nebraska", "Kansas", "Minnesota", "Iowa", "Missouri", "Wisconsin",
+            "Illinois", "Michigan", "Indiana", "Ohio", "Arkansas", "Oklahoma")
+states.abr <- c("US-WV", "US-VA", "US-KY", "US-TN", "US-NC", "US-SC", "US-GA", 
+                "US-AL", "US-MD", "US-MS", "US-CT", "US-DE", "US-MA", "US-NH", 
+                "US-NJ", "US-NY", "US-PA", "US-RI", "US-VT", "US-DC", 
+                "US-ND", "US-SD", "US-NE", "US-KS", "US-MN", "US-IA", "US-MO", "US-WI", 
+                "US-IL", "US-MI", "US-IN", "US-OH", "US-AR", "US-OK")
+
+### Import grid used as mask for eBird status
+statusEastUSA <- readRDS(here("Data", "BioIndicator", "birdStatusGrid_4326_EastUSA_3kmGridAndBuffer_20231017.rds"))
+# 
+# status.grid <- st_read("/Users/jsr293/Documents/GIS_Data/eBird_StatusTrend_Grids/statusGrid_USA_4326.shp")
+# 
+# ### Crop Raster with Spatial object
+# region <- st_transform(us_states, crs = 4326)
+# 
+# ### Select states covering our region of interest
+# states <- c("West Virginia", "Virginia","Kentucky", "Tennessee", "North Carolina", "South Carolina", "Georgia",
+#             "Alabama", "Maryland", "Mississippi", "Connecticut", "Delaware", "Massachusetts", "New Hampshire",
+#             "New Jersey", "New York", "Pennsylvania", "Rhode Island", "Vermont", "District of Columbia",
+#             "North Dakota", "South Dakota", "Nebraska", "Kansas", "Minnesota", "Iowa", "Missouri", "Wisconsin",
+#             "Illinois", "Michigan", "Indiana", "Ohio", "Arkansas", "Oklahoma") 
+# east.USA <- region[which(region$NAME %in% states), ]
+# 
+# ### Dissolve the region as one polygon
+# regionDiss <- east.USA %>% 
+# 	 st_union() %>%
+# 	 st_sf()
+# 
+# ### Crop the status grid to contiguous USA
+# statusEastUSA <- st_crop(status.grid, regionDiss)
+
+### Grid cells with bees (any number of bees; based on bird status grid).
+grid.bees <- readRDS(here("Data", "BioIndicator", "bees_standardized_meanPerSurvey_no1beeSurv_2007to2021_20231017.rds"))
+
+### Check how many locations have a sufficient sample size
+bee.locs <- grid.bees[which(grid.bees$nBees >= 30 | grid.bees$nSurveys >= 2),] 
+# 3,076 locations (of which we have bird data for 2,585 locations, or 84%)
+
+# identical(st_crs(grid.bees), st_crs(statusEastUSA)) # TRUE
+
+# remove(status.grid, states, east.USA, regionDiss)
+
+```
+&nbsp;     
+ 
+#### Extract eBird samples falling within grid cells with bees
+```{r}
+
+### Extract eBird surveys for some states and years
+ebd_filters <- ebd_sampl %>%
+  auk_state(state = states.abr) %>%
+	auk_date(date = c("2007-01-01", "2021-12-31")) %>%
+	auk_protocol(protocol = c("Stationary", "Traveling")) %>%
+	auk_complete() %>%
+  auk_filter(file = samplEast, overwrite = TRUE)
+
+### Import the filtered observation records
+f_sampl <- read_sampling(samplEast, unique = FALSE) # 18,768,491 checklists if unique = TRUE; 21,337,614 when using unique = FALSE
+
+### Select observations during breeding season
+f_sampl.breed <- f_sampl %>%
+  dplyr::mutate(obs_date = as.Date(observation_date), 
+                Jul_date = yday(obs_date))
+
+### Select surveys done between mid-May and mid-August                
+f_sampl.breed <- f_sampl.breed[which(f_sampl.breed$Jul_date >= 135 &
+                                 f_sampl.breed$Jul_date < 227 &  # Select breeding season days:
+                                 f_sampl.breed$duration_minutes >= 5 &
+                                 f_sampl.breed$duration_minutes <= 300), ]
+# 4,458,699 surveys
+
+remove(f_sampl)
+
+### Keep only a few columns to minimize size
+f_sampl.breed.cols <- f_sampl.breed[, c("latitude", "longitude", "observation_date", "time_observations_started", "observer_id", "sampling_event_identifier", "protocol_code", "duration_minutes", "effort_distance_km", "group_identifier")] 
+
+### Create spatial object of survey data
+f_sampl.breed.cols$Lat <- f_sampl.breed.cols$latitude
+f_sampl.breed.cols$Long <- f_sampl.breed.cols$longitude
+f_sampl.breed.cols.sf <- st_as_sf(x = f_sampl.breed.cols,
+         coords = c("Long", "Lat"),
+         crs = 4326)
+f_sampl.breed.cols.sf <- st_transform(f_sampl.breed.cols.sf, crs = st_crs(statusEastUSA))
+
+### Make sure the grid is in the same coordinates as the bird samples
+# identical(st_crs(grid.bees), st_crs(f_sampl.breed.cols.sf)) # TRUE
+
+### Extract samples in region of interest
+survInStates <- st_filter(f_sampl.breed.cols.sf, statusEastUSA) 
+# 4,394,881 bird surveys
+
+### Identify the grid cell in which each sampling is located
+surv.grid <- sf::st_join(survInStates, grid.bees, join = st_intersects) 
+
+### Keep only sampling that fall within one of the grid cells used in the bee grid (whether there were bees or not)
+surv.grid.cell <- surv.grid[which(!is.na(surv.grid$idCells)), ] 
+# 4,394,881 samplings 
+st_geometry(surv.grid.cell) <- NULL
+
+### Save another version where we have only the grid cells with bird surveys AND bee data
+surv.bees.grid <- surv.grid.cell[which(surv.grid.cell$nBees > 0), ] 
+# 782,734 sampling in 4,937 grid cells where we have bee data for 2007 to 2021
+
+write.csv(surv.grid.cell, "/Volumes/BirdsBees/Data/eBird/BirdsIndicators_MidSteps/eBirdSampling_withCellID_EastHalfUSA_2007to2021_20231017.csv", row.names = FALSE)
+write.csv(surv.bees.grid, "/Volumes/BirdsBees/Data/eBird/BirdsIndicators_MidSteps/eBirdSampling_withCellID_withBeeData_EastHalfUSA_2007to2021_20231017.csv", row.names = FALSE)
+
+### Some cleaning
+remove(surv.grid, survInStates, f_sampl.breed.cols, f_sampl.breed.cols.sf, states.abr) # f_sampl.breed, 
+
+```
+&nbsp;     
+ 
+#### Remove checklists for observers who submitted 2 or less checklists
+```{r}
+
+surv.bees.grid <- read.csv("/Volumes/BirdsBees/Data/eBird/BirdsIndicators_MidSteps/eBirdSampling_withCellID_withBeeData_EastHalfUSA_2007to2021_20231017.csv")
+
+### Select only bird surveys where we have a minimum of 30 bees OR 2 bee surveys
+surv.bees.grid.30 <- surv.bees.grid[which(surv.bees.grid$nBees >= 30 | surv.bees.grid$nSurveys >= 2),] # 490,849 surveys
+# length(unique(surv.bees.grid.30$idCells)) # 2,668 grid cells
+
+### Identify the number of checklists per observer ID
+listsPerObserver <- surv.bees.grid.30 %>%
+  group_by(observer_id) %>%
+  summarise(nLists = n_distinct(sampling_event_identifier), .groups = "drop")
+
+### Identify observers with 3 or more lists
+observers <- listsPerObserver$observer_id[which(listsPerObserver$nLists > 2)] 
+# 18,175 observers if min 30 bees
+
+### Keep only observations make by the observers with 3 or more checklists
+surv.bees.grid.30.obs <- surv.bees.grid.30[which(surv.bees.grid.30$observer_id %in% observers), ] # 469,310 checklists
+# length(unique(surv.bees.grid.30.obs$idCells)) # 2,609 grid cells
+
+```
+&nbsp;     
+ 
+#### Extract the eBird observations associated with the checklists above
+```{r}
+
+### Extract eBird observations for the selected states and years
+ebd_filters <- ebd_obs %>%
+  auk_state(state = states.abr) %>%
+	auk_date(date = c("2007-01-01", "2021-12-31")) %>%
+	auk_protocol(protocol = c("Stationary", "Traveling")) %>%
+	auk_complete() %>%
+  auk_filter(file = obsEast, overwrite = TRUE)
+
+### Reduce the size of the eBird observation file by keeping only a few columns
+ebd_cols <- c("global unique identifier", "common name", "scientific name", "observation count",
+              "state code", "locality id", "latitude", "longitude",
+              "observation date", "time observations started", "observer id", "sampling event identifier" ,
+              "protocol code", "duration minutes", "effort distance km", "group identifier")
+
+f_obs <- auk_ebd(obsEast) %>%
+  auk_select(select = ebd_cols, file = obsEast_small)
+
+### Select only eBird observation that match the selected eBird sampling
+ebd_obs_atBees <- read_table_chunkwise(obsEast_small, chunk_size = 5000000, sep = "\t")  %>%
+  inner_join(surv.bees.grid.30.obs, by = c("SAMPLING.EVENT.IDENTIFIER" = "sampling_event_identifier")) %>%
+  write_csv_chunkwise(file = "/Volumes/BirdsBees/Data/eBird/BirdsIndicators_MidSteps/eBirdObsSampl_atGridWith30Bees_EastUSA_2007to2021_20231017.csv", row.names = FALSE)
+ 
+remove(f_sampl.breed, surv.grid.cell, statusEastUSA, listsPerObserver, ebd_sampl, ebd_obs_atBees, ebd_obs, observers, surv.bees.grid, surv.bees.grid.30, surv.bees.grid.30.obs, grid.bees)
+
+### Import the selected observations
+surveysObs1 <- read.csv("/Volumes/BirdsBees/Data/eBird/BirdsIndicators_MidSteps/eBirdObsSampl_atGridWith30Bees_EastUSA_2007to2021_20231017.csv")
+# 9,845,6946 observations
+
+```
+&nbsp;     
+ 
+#### Clean up the eBird observations to remove checklists duplicates and keep only species level
+```{r}
+
+### Remove duplicated lists
+surveysObs2 <- surveysObs1[!duplicated(surveysObs1$group_identifier) & !is.na(surveysObs1$group_identifier),] 
+# 43,565
+surveysObs1 <- surveysObs1[is.na(surveysObs1$group_identifier),] 
+# 7,377,261 records for 2007 to 2021
+surveysObs1 <- rbind(surveysObs1, surveysObs2) 
+# 7,420,826 records
+
+remove(surveysObs2)
+
+### Remove observations associated with checklists that have an X in them.
+surveysObs1$OBSERVATION.COUNT <- as.numeric(as.character(surveysObs1$OBSERVATION.COUNT))
+X.checklists <- surveysObs1[which(is.na(surveysObs1$OBSERVATION.COUNT)), ]
+X.checklists <- unique(X.checklists$SAMPLING.EVENT.IDENTIFIER) 
+# 35,528 checklists have an X in them; 
+surveysObs1 <- surveysObs1[which(surveysObs1$SAMPLING.EVENT.IDENTIFIER %notin% X.checklists),] 
+# 6,507,240 observations
+
+### Remove duplicate columns and rename to small letters (as needed for auk_ functions)
+surveysObs1 <- surveysObs1[, c("COMMON.NAME", "SCIENTIFIC.NAME", "OBSERVATION.COUNT", "OBSERVATION.DATE", "TIME.OBSERVATIONS.STARTED", "DURATION.MINUTES", "EFFORT.DISTANCE.KM", 
+                               "PROTOCOL.CODE", "STATE.CODE", "LOCALITY.ID", "LATITUDE", "LONGITUDE", "OBSERVER.ID", "SAMPLING.EVENT.IDENTIFIER", 
+                               "GLOBAL.UNIQUE.IDENTIFIER", "GROUP.IDENTIFIER", "idCells")] 
+names(surveysObs1) <- c("common_name", "scientific_name", "observation_count", "observation_date", "time_observations_started", "duration_minutes", "effort_distance_km", "protocol_code", "state_code", "locality_id", "latitude", "longitude", "observer_id", "sampling_event_identifier", "global_unique_identifier", "group_identifier", "idCells")
+  
+### Update subspecies to species taxonomic level (this step takes a somewhat long time ~ 15 minutes)
+surveysObs1 <- auk_rollup(surveysObs1)  # 6,451,901 observations
+# length(unique(surveysObs1$idCells)) # 2,594 grid cells
+
+### Export eBird data
+write.csv(surveysObs1, "/Volumes/BirdsBees/Data/eBird/BirdsIndicators_MidSteps/eBirdObsSampl_clean_atGridWith30Bees_EastUSA_2007to2021_20231017.csv", row.names = FALSE)
+
+```
+&nbsp;     
+ 
+#### Assess the prevalence of each species across locations with bee data (i.e., prevalence within surveyed locations).   
+#### Select species for which their breeding range covers at least 40% of our study area and that are present in at least 20% of our surveyed locations.    
+```{r}
+# eBird key to download data: 4lh7ngufqcfb
+
+### Import observations and surveys
+# surveysObs1 <- read.csv("/Volumes/BirdsBees/Data/eBird/BirdsIndicators_MidSteps/eBirdObsSampl_clean_atGridWith30Bees_EastUSA_2007to2021_20231017.csv")
+
+### Calculate the number of birds per grid cell and per species
+nPerSppPerGrid.2007.30 <- surveysObs1 %>%
+  group_by(common_name, idCells) %>%
+  mutate(observation_count = as.numeric(as.character(observation_count))) %>%
+  summarise(nBirds = sum(observation_count), .groups = "drop") %>%
+  spread(common_name, nBirds)
+# 2,594 grid cells and 462 bird species
+
+### Calculate the prevalence for each species. Here we are going to use only species present in the grid cells we will ultimately use.
+nPerSppPerGrid.2007.30[is.na(nPerSppPerGrid.2007.30)] <- 0
+nPerSppPerGrid.2007.30.col2toEnd <- nPerSppPerGrid.2007.30[ ,c(2:(dim(nPerSppPerGrid.2007.30)[2]))]
+nPerSppPerGrid.2007.30.prev <- round(colSums(nPerSppPerGrid.2007.30.col2toEnd > 0) / nrow(nPerSppPerGrid.2007.30.col2toEnd), 4) * 100
+species.2007.30 <- names(nPerSppPerGrid.2007.30.col2toEnd)
+prev.2007.30 <- as.data.frame(cbind(species.2007.30, prev = nPerSppPerGrid.2007.30.prev))
+prev.2007.30$prev <- as.numeric(as.character(prev.2007.30$prev))
+
+### Export prevalence per species
+write.csv(prev.2007.30, here("Data", "BioIndicator", "birdSpp_prevalences_30beeGrids_2007to2021_20231017.csv"), row.names = FALSE)
+
+### Import file with percentage of our study area covered by the breeding range of each species
+range.pct <- read.csv(here("Data", "BioIndicator", "pctOfEastHalfUSA_coveredByBirdRanges_20230511.csv"))
+
+### Combine locations and study area prevalences for each range of years.
+allPrevs.2007.30 <- merge(prev.2007.30, range.pct, by.x = "species.2007.30", by.y = "PRIMARY_COM_NAME")
+
+write.csv(allPrevs.2007.30, here("Data", "BioIndicator", "prevalencesBirds_byLocations_byStudyArea_30beeGrids_2007to2021_20231017.csv"), row.names = FALSE)
+
+remove(range.pct, nPerSppPerGrid.2007.30, nPerSppPerGrid.2007.30.col2toEnd, nPerSppPerGrid.2007.30.prev, allPrevs.2007.30)
+
+```
+&nbsp;     
+ 
+#### Create a copy that has the zero filled data, using only species with at least 20% prevalence
+```{r}
+
+### Recreate two datasets: observations and checklists from merge dataset
+ebd_surv <- surveysObs1 %>%
+  select("latitude", "longitude", "observation_date", "time_observations_started", "observer_id",
+                           "sampling_event_identifier", "protocol_code", "duration_minutes", "effort_distance_km",
+                           "group_identifier", "state_code", "locality_id", "idCells") %>%
+  distinct(sampling_event_identifier, .keep_all = TRUE)
+# 377,830 checklists
+
+surveysObs1 <- surveysObs1[, c("global_unique_identifier", "common_name", "scientific_name", "observation_count", "sampling_event_identifier")]
+# 6,451,901 observations
+
+### Save files, just in case!
+saveRDS(surveysObs1, here("/Volumes/BirdsBees/Data/BioIndicator/eBirdObs_allBirds_EastUSA_2007to2021_20231017.rds"))
+saveRDS(ebd_surv, here("/Volumes/BirdsBees/Data/BioIndicator/eBirdSamples_allBirds_EastUSA_2007to2021_20231017.rds"))
+
+### Import list of species with at least 10% prevalence by locations of surveys and 40% prevalence by study area, if needed
+prevalences.30 <- read.csv(here("Data", "BioIndicator", "prevalencesBirds_byLocations_byStudyArea_30beeGrids_2007to2021_20231017.csv"))
+names(prevalences.30) <- c("CommonNames", "prev", "species", "pct.area")
+
+### Check if some grassland species have prevalence just below 20%, for which their breeding distribution still covers 40% of study area
+# test.30 <- prevalences.30[which(prevalences.30$pct.area >= 40),]
+
+### Dickcissel, Grasshopper Sparrow, and Bobolink are grassland species (of interest)
+spp.2007.30.prev <- prevalences.30$CommonNames[which(prevalences.30$prev >= 20 & prevalences.30$pct.area >= 40 | prevalences.30$CommonNames %in% c("Dickcissel", "Grasshopper Sparrow"))] # 88 species
+
+### Remove birds of prey
+flyovers <- c("American Kestrel", "Bald Eagle", "Broad-winged Hawk", "Chimney Swift", "Common Nighthawk", 
+              "Cooper's Hawk", "Red-shouldered Hawk", "Red-tailed Hawk", "Turkey Vulture")
+spp.2007.30.prev <- spp.2007.30.prev[spp.2007.30.prev %notin% flyovers] # 79 species
+
+### Zero-fill the species and export file
+ebd_zf <- surveysObs1 %>%
+  group_by(common_name, sampling_event_identifier) %>%
+  count() %>%
+  ungroup() %>%
+  complete(common_name, sampling_event_identifier, fill = list(n = 0)) %>%
+  filter(common_name %in% spp.2007.30.prev) %>%  # I need to keep the checklists where these species are not detected.
+  left_join(surveysObs1, by = c("common_name", "sampling_event_identifier")) %>%
+  mutate(observation_count = ifelse(is.na(observation_count), 0, observation_count)) %>%
+  select(sampling_event_identifier, common_name, observation_count) %>%
+  left_join(ebd_surv, by = "sampling_event_identifier") %>%
+  select(sampling_event_identifier, common_name, observation_count, latitude, longitude, observation_date, 
+         observer_id, protocol_code, duration_minutes, effort_distance_km, time_observations_started, idCells) %>%
+  group_by(common_name) %>%
+  group_walk(~write.csv(.x, paste0("/Volumes/BirdsBees/Data/BioIndicator/eBirdObsSampl_2007to2021_min30beesCells/eBirdObsSampl_10prev_zf_", .y$common_name, "_atGridWith30Bees2Surv_EastUSA_2007to2021_20231017.csv"), row.names = FALSE))
+
+```
+
+
