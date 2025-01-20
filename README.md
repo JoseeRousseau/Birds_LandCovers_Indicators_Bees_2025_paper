@@ -18,6 +18,6 @@ We demonstrate that birds add value to land cover data as indicators of wild bee
 These improvements likely stem from the demonstrated sensitivity of birds to conditions thought to impact bees but that are missed by remotely sensed environmental data. Importantly, this enables estimation of bee richness in places that don’t have direct observations of bees. In the case of wild bees specifically, we suggest that bird and land cover data, when combined, serve as useful indicators to guide monitoring and conservation priorities until the quality and quantity of bee data improve.
 
 
- DOI: 
+ DOI: [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.14705885.svg)](https://doi.org/10.5281/zenodo.14705885)
 
 Manuscript currently in peer-review process. Preprint available at https://www.biorxiv.org/content/10.1101/2024.02.14.580016v1
